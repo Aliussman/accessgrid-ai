@@ -419,6 +419,48 @@ def _evaluate_modification(
     return fields
 
 
+def _edge_name(net: Network, u: int, v: int) -> Optional[str]:
+    """Return OSM road name or route ref for an edge, if known."""
+    data = net.graph.get_edge_data(u, v) or {}
+    for d in data.values():
+        if d.get("name"):
+            return str(d["name"])
+        if d.get("ref"):
+            return str(d["ref"])
+    return None
+
+
+def _path_corridor_name(net: Network, edges: list[tuple[int, int]]) -> str:
+    """Return a clean composite street name for a list of edges."""
+    names = []
+    for u, v in edges:
+        n = _edge_name(net, u, v)
+        if n and n not in names:
+            names.append(n)
+    if names:
+        return " / ".join(names[:2])
+    return "Parallel Arterial Route"
+
+
+def _find_bypass_corridor(
+    net: Network, closed_edges: list[tuple[int, int]], worst_edge: tuple[int, int]
+) -> tuple[list[tuple[int, int]], str]:
+    """Find the shortest detour around all closed edges from the worst edge endpoints."""
+    work = net.graph.copy()
+    for u, v in closed_edges:
+        if u in work and v in work:
+            for k in list((work.get_edge_data(u, v) or {})):
+                work.remove_edge(u, v, k)
+    u, v = worst_edge
+    try:
+        path = nx.shortest_path(work, u, v, weight="travel_time")
+        pairs = [(min(path[i], path[i + 1]), max(path[i], path[i + 1])) for i in range(len(path) - 1)]
+        name = _path_corridor_name(net, pairs)
+        return pairs, name
+    except Exception:
+        return [], "Parallel Arterial Route"
+
+
 def interventions(
     net: Network,
     closed_edges: list[tuple[int, int]],
@@ -426,23 +468,16 @@ def interventions(
     baseline: Optional[dict] = None,
     max_segments: int = 8,
 ) -> list[dict]:
-    """Rank candidate interventions for a road-closure scenario.
+    """Rank candidate tactical interventions for a road-closure scenario.
 
     Candidates generated:
-      * reopen every closed segment at once (full recovery)
-      * reopen each of the top-``max_segments`` most-used segments
-        (per-segment marginal benefit; the rest are evaluated jointly as
-        'reopen all other segments')
-      * an emergency corridor: traffic sped up along the best parallel route
-        for the single most destructive segment (segment stays closed)
-
-    Closing a named road can remove hundreds of segments, so per-segment
-    evaluation is capped at ``max_segments`` (ranked by pop-weighted route
-    usage, which is free from the baseline tree) to keep the UI responsive.
-
-    Each candidate reports population restored (all-in-threshold access back),
-    population recovered (no longer affected at all), average time saved and
-    accessibility recovery %. Score is a 0-100 blend of those (50/30/20)."""
+      * Targeted Bottleneck Clearance (reopen single highest-yield chokepoint)
+      * Dedicated EMS Green-Wave Corridor (speed up detour around disruption)
+      * Tactical Mobile Triage Unit (deploy field clinic at highest-debt cluster)
+      * Phased Corridor Recovery (reopen individual major arterials in multi-road closures)
+      * Contraflow EMS Transit Lane (two-way emergency transit on parallel route)
+      * Comprehensive Network Clearance (full recovery benchmark)
+    """
     if baseline is None:
         baseline = coverage(net, threshold)
     threshold = float(threshold)
@@ -464,45 +499,132 @@ def interventions(
 
     keyed = sorted(closed, key=_usage, reverse=True)
     worst = keyed[0]
+    worst_name = _edge_name(net, worst[0], worst[1]) or "Critical Arterial Section"
     top = keyed[:max_segments]
     rest = keyed[max_segments:]
 
-    candidates: list[dict] = [{
+    candidates: list[dict] = []
+
+    # 1. Comprehensive Reopening (Benchmark)
+    candidates.append({
         "kind": "reopen_all",
-        "name": "Reopen all closed segments",
-        "remove_edges": [],  # nothing stays closed
+        "category": "Full Network Recovery",
+        "name": "Comprehensive Network Clearance (All Corridors Cleared)",
+        "tactic": "Mobilize full-scale municipal operations across all affected sectors to restore all closed corridors simultaneously.",
+        "effort": "🔴 High (Full City Mobilization)",
+        "remove_edges": [],
         "boost_edges": [],
-    }]
+        "extra_sources": [],
+    })
+
+    # 2. Per-segment / chokepoint clearance for top segments
     for e in top:
+        e_name = _edge_name(net, e[0], e[1]) or f"Segment {e[0]}-{e[1]}"
         others = [o for o in closed if o != e]
+        is_worst = (e == worst)
         candidates.append({
             "kind": "reopen_one",
-            "name": f"Reopen segment {e[0]}-{e[1]}",
-            "remove_edges": others,  # keep the rest closed, reopen this one
+            "category": "Chokepoint Clearance" if is_worst else "Segment Clearance",
+            "name": f"Targeted Bottleneck Clearance: {e_name}" if is_worst else f"Reopen Arterial Segment: {e_name}",
+            "tactic": (
+                f"Deploy rapid mobile de-watering pumps and towing to clear the critical chokepoint on {e_name}."
+                if is_worst else
+                f"Clear localized obstruction on {e_name} to restore secondary bypass connectivity."
+            ),
+            "effort": "⚡ Low (1 Rapid Crew)",
+            "remove_edges": others,
             "boost_edges": [],
+            "extra_sources": [],
         })
+
+    # 3. Reopen remaining segments if capped
     if rest:
         candidates.append({
             "kind": "reopen_rest",
+            "category": "Secondary Segments Recovery",
             "name": "Reopen all other closed segments",
-            "remove_edges": top,  # keep top harmful segments closed
+            "tactic": "Clear secondary perimeter road segments while leaving high-impact corridors closed.",
+            "effort": "🟠 Moderate Fleet",
+            "remove_edges": top,
             "boost_edges": [],
+            "extra_sources": [],
         })
 
-    alt = _alternate_path(net, worst)
-    if alt:
+    # 4. Dedicated EMS Green-Wave Transit Corridor
+    bypass_edges, bypass_name = _find_bypass_corridor(net, closed, worst)
+    if not bypass_edges:
+        alt_legacy = _alternate_path(net, worst)
+        if alt_legacy:
+            bypass_edges = alt_legacy
+            bypass_name = _path_corridor_name(net, alt_legacy)
+
+    if bypass_edges:
         candidates.append({
             "kind": "corridor",
-            "name": ("Emergency corridor: speed up the parallel route around "
-                     f"{worst[0]}-{worst[1]}"),
-            "remove_edges": closed,  # segment stays closed
-            "boost_edges": [(u, v, 0.7) for (u, v) in alt],
+            "category": "Green-Wave EMS Corridor",
+            "name": f"Dedicated EMS Green-Wave Corridor: {bypass_name}",
+            "tactic": f"Activate dynamic traffic signal preemption (TSP) and dedicated police-escorted ambulance lanes along {bypass_name} (+40% transit speed).",
+            "effort": "🟢 Low (Signal Phasing)",
+            "remove_edges": closed,
+            "boost_edges": [(u, v, 0.6) for u, v in bypass_edges],
+            "extra_sources": [],
         })
+
+    # 5. Phased Corridor Reopenings (If multi-road closure)
+    road_groups: dict[str, list[tuple[int, int]]] = {}
+    for u, v in closed:
+        rname = _edge_name(net, u, v)
+        if rname:
+            road_groups.setdefault(rname, []).append((u, v))
+
+    if len(road_groups) > 1:
+        for rname, redges in road_groups.items():
+            candidates.append({
+                "kind": "phased_corridor",
+                "category": "Phased Corridor Recovery",
+                "name": f"Priority Corridor Clearance: Reopen {rname}",
+                "tactic": f"Concentrate municipal heavy machinery and civil defense crews exclusively on {rname} first to re-establish primary arterial throughput before secondary links.",
+                "effort": "🟠 Moderate (Dedicated Fleet)",
+                "remove_edges": [e for e in closed if e not in set(redges)],
+                "boost_edges": [],
+                "extra_sources": [],
+            })
+
+    # 6. Deploy Tactical Mobile Triage Unit (Field Stabilization Pod)
+    if disrupted.get("zone_impact") and len(closed) > 2:
+        hotspot_node = max(disrupted["zone_impact"].items(), key=lambda kv: kv[1])[0]
+        hotspot_d = net.graph.nodes[hotspot_node]
+        if "x" in hotspot_d and "y" in hotspot_d:
+            neighbors = list(net.graph.neighbors(hotspot_node))
+            hotspot_street = _edge_name(net, hotspot_node, neighbors[0]) if neighbors else "Hazard Sector"
+            hotspot_label = hotspot_street or f"Sector Node {hotspot_node}"
+            candidates.append({
+                "kind": "mobile_facility",
+                "category": "Mobile Triage Unit",
+                "name": f"Deploy Mobile Triage Pod: Near {hotspot_label}",
+                "tactic": f"Position an Advanced Life Support (ALS) mobile field triage unit at {hotspot_label}, instantly restoring emergency stabilization within the 8-minute golden window.",
+                "effort": "🟡 Medium (1 Mobile Unit)",
+                "remove_edges": closed,
+                "boost_edges": [],
+                "extra_sources": [hotspot_node],
+                "facility_node": hotspot_node,
+                "facility_coord": {
+                    "lat": float(hotspot_d.get("y", 0.0)),
+                    "lng": float(hotspot_d.get("x", 0.0)),
+                    "node_id": hotspot_node,
+                },
+            })
 
     results = []
     for cand in candidates:
-        f = _evaluate_modification(net, baseline, threshold,
-                                   cand["remove_edges"], cand["boost_edges"])
+        f = _evaluate_modification(
+            net,
+            baseline,
+            threshold,
+            cand["remove_edges"],
+            cand.get("boost_edges", []),
+            cand.get("extra_sources", []),
+        )
         lost_nodes_int = set(f["lost_nodes"])
         restored = sum(
             net.population.get(n, 0)
@@ -525,11 +647,15 @@ def interventions(
         else:
             recovery = recovered_affected / affected_ref * 100.0 if affected_ref else 0.0
         debt_after = float(f["debt_pop_minutes"])
-        results.append({
+        
+        res_item = {
             "kind": cand["kind"],
+            "category": cand.get("category", "Intervention"),
             "name": cand["name"],
+            "tactic": cand.get("tactic", ""),
+            "effort": cand.get("effort", "Medium"),
             "remove_edges": [(int(a), int(b)) for a, b in cand["remove_edges"]],
-            "boost_edges": [(int(a), int(b), float(x)) for a, b, x in cand["boost_edges"]],
+            "boost_edges": [(int(a), int(b), float(x)) for a, b, x in cand.get("boost_edges", [])],
             "population_restored": int(restored),
             "population_recovered": int(recovered_affected),
             "avg_time_saved_min": float(avg_saved),
@@ -537,11 +663,31 @@ def interventions(
             "debt_after_pop_min": debt_after,
             "debt_reduction_pct": (disrupted_debt - debt_after) / disrupted_debt * 100.0
             if disrupted_debt else 0.0,
-        })
+        }
+        if "facility_node" in cand:
+            res_item["facility_node"] = cand["facility_node"]
+            res_item["facility_coord"] = cand["facility_coord"]
+        results.append(res_item)
 
-    _score_interventions(results)
-    results.sort(key=lambda r: r["score"], reverse=True)
-    return results
+    # Filter zero-yield duplicate candidates while preserving reopen_all / primary options
+    filtered_results = []
+    seen_names = set()
+    for r in results:
+        if r["name"] in seen_names:
+            continue
+        if r["kind"] == "reopen_all" or r["debt_reduction_pct"] > 0.05 or r["population_restored"] > 0 or r["avg_time_saved_min"] > 0.05:
+            seen_names.add(r["name"])
+            filtered_results.append(r)
+        elif len(results) <= 3:
+            seen_names.add(r["name"])
+            filtered_results.append(r)
+
+    if not filtered_results:
+        filtered_results = results
+
+    _score_interventions(filtered_results)
+    filtered_results.sort(key=lambda r: r["score"], reverse=True)
+    return filtered_results[:8]
 
 
 def _score_interventions(results: list[dict]) -> None:

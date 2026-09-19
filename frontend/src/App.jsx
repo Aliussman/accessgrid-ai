@@ -106,9 +106,15 @@ export default function App() {
     ? activeScenario.isochrone_sample || overview?.isochrone_sample || []
     : overview?.isochrone_sample || [];
 
-  const closedGeoms = selectedIntervention?.boost_edges
-    ? [] // when previewing, display adjusted geometry
-    : activeScenario?.closed_geometries || [];
+  const closedGeoms = selectedIntervention
+    ? (selectedIntervention.closed_geometries || [])
+    : (activeScenario?.closed_geometries || []);
+
+  const boostGeoms = (selectedIntervention && selectedIntervention.boost_geometries?.length)
+    ? selectedIntervention.boost_geometries
+    : (activeScenario?.boost_geometries || []);
+
+  const facilityCoord = selectedIntervention?.facility_coord || activeScenario?.facility_coord || null;
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -249,6 +255,56 @@ export default function App() {
             </div>
           </div>
 
+          {/* Active Intervention Preview Banner */}
+          {selectedIntervention && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '12px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 1000,
+                background: 'rgba(15, 23, 42, 0.94)',
+                border: '1px solid var(--accent-cyan)',
+                boxShadow: '0 8px 32px rgba(6, 182, 212, 0.3)',
+                borderRadius: '8px',
+                padding: '8px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Zap size={15} color="var(--accent-cyan)" />
+                <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#ffffff' }}>
+                  Preview: {selectedIntervention.name}
+                </span>
+              </div>
+              <span className="badge badge-emerald" style={{ fontSize: '0.7rem' }}>
+                -{selectedIntervention.debt_reduction_pct?.toFixed(1)}% Debt
+              </span>
+              <span className="badge badge-cyan" style={{ fontSize: '0.7rem' }}>
+                +{selectedIntervention.population_restored?.toLocaleString()} Restored
+              </span>
+              <button
+                onClick={() => setSelectedIntervention(null)}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: '#ffffff',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.7rem',
+                  padding: '2px 8px',
+                  marginLeft: '4px',
+                }}
+              >
+                ✕ Exit Preview
+              </button>
+            </div>
+          )}
+
           {/* Leaflet Map */}
           <div className="map-wrapper">
             <MapComponent
@@ -256,9 +312,9 @@ export default function App() {
               hospitals={overview?.hospitals || []}
               isochrones={isochronesData}
               closedGeoms={closedGeoms}
-              boostGeoms={activeScenario?.boost_geometries || []}
+              boostGeoms={boostGeoms}
               riskiest={overview?.riskiest_corridors || []}
-              facilityCoord={activeScenario?.facility_coord}
+              facilityCoord={facilityCoord}
               showIsochrones={showIsochrones}
               showRiskiest={showRiskiest}
             />

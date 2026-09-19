@@ -242,6 +242,21 @@ def run_simulation(req: SimulateRequest):
         if closed_edges:
             impact = closure_impact(NET, closed_edges, req.threshold, baseline)
             candidates = interventions(NET, closed_edges, req.threshold, baseline)
+            for cand in candidates:
+                cand_boost = []
+                for item in cand.get("boost_edges", []):
+                    u, v = item[0], item[1]
+                    c = _edge_coords(u, v)
+                    if c:
+                        cand_boost.append(c)
+                cand["boost_geometries"] = cand_boost
+
+                cand_closed = []
+                for u, v in cand.get("remove_edges", []):
+                    c = _edge_coords(u, v)
+                    if c:
+                        cand_closed.append(c)
+                cand["closed_geometries"] = cand_closed
         else:
             impact = None
 

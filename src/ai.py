@@ -87,11 +87,13 @@ def explain_interventions(impact: dict, interventions: list, net) -> dict:
         return {"provider": "template", "text": "No interventions were tested."}
     rows = []
     for i, r in enumerate(interventions, 1):
+        tactic_str = f" — {r['tactic']}" if r.get("tactic") else ""
+        effort_str = f" [Effort: {r.get('effort', 'N/A')}]" if r.get("effort") else ""
         rows.append(
-            f"{i}. {r['name']}: restored {r['population_restored']:,}, "
+            f"{i}. {r['name']}{effort_str}: restored {r['population_restored']:,}, "
             f"recovered {r['population_recovered']:,}, "
             f"saved {r['avg_time_saved_min']:.2f} min avg, "
-            f"reduced accessibility debt {r.get('debt_reduction_pct', 0.0):.1f}%"
+            f"reduced accessibility debt {r.get('debt_reduction_pct', 0.0):.1f}%{tactic_str}"
         )
     context = _INTERVENTION_PROMPT.format(
         threshold=impact["threshold"],
@@ -105,14 +107,16 @@ def explain_interventions(impact: dict, interventions: list, net) -> dict:
     text = _gemini_summary(context)
     if text is None:
         best = interventions[0]
+        tactic_note = f"\n- Tactical directive: {best['tactic']}" if best.get("tactic") else ""
+        effort_note = f"\n- Resource commitment: {best.get('effort', 'Standard mobilization')}" if best.get("effort") else ""
         lines = [
-            f"The most promising intervention is '{best['name']}'.",
-            "It restores the largest share of hospital access in this scenario:",
-            f"- {best['population_restored']:,} people regain all-threshold access.",
-            f"- average time saved {best['avg_time_saved_min']:.2f} min per affected person.",
-            f"- accessibility debt reduced {best.get('debt_reduction_pct', 0.0):.1f}%.",
-            "A planner should re-open this route first, or keep it as an "
-            "emergency-only corridor while the disruption persists.",
+            f"The recommended tactical intervention is '{best['name']}'.",
+            "It delivers optimal recovery vs implementation effort in this scenario:",
+            f"- {best['population_restored']:,} people regain all-threshold emergency access.",
+            f"- Average time saved {best['avg_time_saved_min']:.2f} min per affected person.",
+            f"- Accessibility debt reduced by {best.get('debt_reduction_pct', 0.0):.1f}%.",
+            f"{tactic_note}",
+            f"{effort_note}",
         ]
         return {"provider": "template", "text": "\n".join(lines)}
     return {"provider": "gemini", "text": text}
