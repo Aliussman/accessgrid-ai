@@ -1,0 +1,7 @@
+AccessGrid cached data
+Study area centre: 30.71, 76.75  radius: 8.0 km
+city.graphml       : drive network, largest SCC, speed_kph & travel_time(min)
+hospitals.geojson  : OSM amenity=hospital, snapped to nearest node;
+                    type (osm tag); capacity = SYNTHETIC beds (not real)
+pop_by_node.csv    : node_id, population per graph node
+population source  : SYNTHETIC FALLBACK (not real data)
