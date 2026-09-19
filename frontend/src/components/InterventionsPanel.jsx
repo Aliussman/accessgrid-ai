@@ -78,13 +78,13 @@ export default function InterventionsPanel({
                 borderColor: isSelected
                   ? 'var(--accent-cyan)'
                   : isTop
-                  ? 'rgba(16, 185, 129, 0.4)'
-                  : 'rgba(255, 255, 255, 0.07)',
+                    ? 'rgba(16, 185, 129, 0.4)'
+                    : 'rgba(255, 255, 255, 0.07)',
                 background: isSelected
                   ? 'rgba(6, 182, 212, 0.12)'
                   : isTop
-                  ? 'rgba(16, 185, 129, 0.07)'
-                  : 'rgba(255, 255, 255, 0.03)',
+                    ? 'rgba(16, 185, 129, 0.07)'
+                    : 'rgba(255, 255, 255, 0.03)',
                 padding: '12px',
                 borderRadius: '8px',
                 transition: 'all 0.15s ease-in-out',

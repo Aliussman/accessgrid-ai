@@ -66,17 +66,16 @@ Tested interventions (ranked by score):
 """
 
 
-def summarize_closure(impact: dict, net, interventions: Optional[list] = None) -> dict:
-    """Return a closure briefing. ``interventions`` (optional) is the ranked
-    candidate list from ``engine.interventions``; when provided, the briefing
-    also names the best intervention to restore access."""
-    context = _build_context(impact, net)
-    provider = "gemini"
-    text = _gemini_summary(context)
-    if text is None:
-        provider = "template"
-        text = _template_summary(impact, net, interventions)
-    return {"provider": provider, "text": text}
+def summarize_closure(impact: dict, net, interventions: Optional[list] = None, use_gemini: bool = False) -> dict:
+    """Return a closure briefing. By default uses instant template summary
+    so simulation slider / preset changes respond in milliseconds."""
+    if use_gemini:
+        context = _build_context(impact, net)
+        text = _gemini_summary(context)
+        if text is not None:
+            return {"provider": "gemini", "text": text}
+    text = _template_summary(impact, net, interventions)
+    return {"provider": "template", "text": text}
 
 
 def explain_interventions(impact: dict, interventions: list, net) -> dict:

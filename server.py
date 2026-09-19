@@ -42,6 +42,7 @@ from src.engine import (
     interventions,
     named_roads,
     road_edges,
+    route_edge_usage,
     travel_time_bands,
 )
 from src.nl import parse_scenario
@@ -75,6 +76,12 @@ for u, v, data in NET.graph.edges(data=True):
         coords = [[float(a["y"]), float(a["x"])], [float(b["y"]), float(b["x"])]]
     key = (min(int(u), int(v)), max(int(u), int(v)))
     EDGE_INDEX[key] = coords
+
+
+# Pre-warm baseline coverage & route usage caches
+for _t in (5.0, 8.0, 10.0, 12.0, 15.0, 20.0):
+    coverage(NET, _t)
+route_edge_usage(NET)
 
 
 def _edge_coords(u: int, v: int) -> list[list[float]]:
