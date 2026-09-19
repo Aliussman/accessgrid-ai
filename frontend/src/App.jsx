@@ -169,14 +169,20 @@ export default function App() {
           <div className="floating-hud">
             <div className="hud-card">
               <div className="hud-label">
-                <Clock size={14} color="var(--accent-cyan)" />
-                Avg Access Time
+                <Clock size={14} color={isDisrupted ? 'var(--accent-rose)' : 'var(--accent-cyan)'} />
+                {isDisrupted ? 'Avg Zone Delay' : 'Avg Access Time'}
               </div>
-              <div className="hud-value">{avgTime?.toFixed(1)} min</div>
-              {isDisrupted && (
-                <div className={`hud-delta ${timeDelta > 0 ? 'danger' : 'success'}`}>
-                  {timeDelta > 0 ? `+${timeDelta.toFixed(1)}m delay` : `${timeDelta.toFixed(1)}m change`}
+              <div className="hud-value" style={{ color: isDisrupted ? '#f87171' : '#ffffff' }}>
+                {isDisrupted
+                  ? `+${(activeScenario?.per_capita_debt_min || timeDelta).toFixed(1)} min`
+                  : `${avgTime?.toFixed(1)} min`}
+              </div>
+              {isDisrupted ? (
+                <div className="hud-delta danger">
+                  {activeScenario?.pop_affected?.toLocaleString()} affected (City: {avgTime?.toFixed(1)}m)
                 </div>
+              ) : (
+                <div className="hud-delta success">Optimal Baseline Coverage</div>
               )}
             </div>
 
