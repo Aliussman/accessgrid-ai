@@ -19,30 +19,44 @@ export default function ScenarioStudio({
   const [selectedRoad, setSelectedRoad] = useState('');
   const [nlQuery, setNlQuery] = useState('');
   const [parsedIntent, setParsedIntent] = useState(null);
+  const [isNlLoading, setIsNlLoading] = useState(false);
 
-  const handleNlSubmit = async (e) => {
-    e.preventDefault();
-    if (!nlQuery.trim()) return;
+  const handleNlSubmit = async (e, directQuery = null) => {
+    if (e) e.preventDefault();
+    const queryToRun = (directQuery || nlQuery).trim();
+    if (!queryToRun) return;
 
+    setIsNlLoading(true);
     try {
       const res = await fetch('/api/nl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: nlQuery }),
+        body: JSON.stringify({ query: queryToRun }),
       });
       const data = await res.json();
       setParsedIntent(data);
 
-      if (data.action === 'close' && data.road) {
+      if (data.action === 'preset' && data.preset_id) {
+        onRunScenario({ scenario: 'closure', preset_id: data.preset_id });
+      } else if (data.action === 'close' && data.road) {
         onRunScenario({ scenario: 'closure', road: data.road });
-      } else if (data.action === 'add_facility' && data.road) {
+      } else if ((data.action === 'add_facility' || data.action === 'facility') && data.road) {
         onRunScenario({ scenario: 'facility', road: data.road });
       } else if (data.action === 'corridor' && data.road) {
         onRunScenario({ scenario: 'corridor', road: data.road });
+      } else if (data.action === 'reopen' || data.action === 'coverage') {
+        onReset();
       }
     } catch (err) {
       console.error('NL Parse error:', err);
+    } finally {
+      setIsNlLoading(false);
     }
+  };
+
+  const handleChipClick = (suggestion) => {
+    setNlQuery(suggestion);
+    handleNlSubmit(null, suggestion);
   };
 
   return (
@@ -61,10 +75,15 @@ export default function ScenarioStudio({
       </div>
 
       {/* Natural Language Query */}
-      <form onSubmit={handleNlSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-          Ask AccessGrid (Natural Language)
-        </label>
+      <form onSubmit={(e) => handleNlSubmit(e)} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+            Ask AccessGrid (Natural Language)
+          </label>
+          {isNlLoading && (
+            <span style={{ fontSize: '0.68rem', color: 'var(--accent-cyan)' }}>Processing...</span>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: '6px' }}>
           <input
             type="text"
@@ -73,15 +92,78 @@ export default function ScenarioStudio({
             placeholder='e.g. "What if Dakshin Marg is closed?"'
             value={nlQuery}
             onChange={(e) => setNlQuery(e.target.value)}
+            disabled={isNlLoading}
           />
-          <button type="submit" className="btn-primary" style={{ padding: '8px 12px' }}>
-            <Sparkles size={14} />
+          <button
+            type="submit"
+            className="btn-primary"
+            style={{ padding: '8px 12px', minWidth: '40px' }}
+            disabled={isNlLoading || !nlQuery.trim()}
+          >
+            <Sparkles size={14} className={isNlLoading ? 'animate-spin' : ''} />
           </button>
         </div>
-        {parsedIntent && parsedIntent.road && (
-          <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>
-            Parsed: <strong>{parsedIntent.action}</strong> on <strong>{parsedIntent.road}</strong>
-          </span>
+
+        {/* Quick Suggestion Chips */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '2px' }}>
+          {[
+            'Dakshin Marg closure',
+            'Monsoon flood',
+            'VIP lockdown',
+            'Green wave Jan Marg',
+          ].map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => handleChipClick(chip)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '12px',
+                padding: '2px 8px',
+                fontSize: '0.66rem',
+                color: 'var(--text-dim)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--accent-cyan)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border-subtle)')}
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+
+        {/* Parsed Feedback Display */}
+        {parsedIntent && (
+          <div style={{
+            fontSize: '0.7rem',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            background: parsedIntent.action === 'help' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(6, 182, 212, 0.1)',
+            border: `1px solid ${parsedIntent.action === 'help' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(6, 182, 212, 0.2)'}`,
+            color: parsedIntent.action === 'help' ? 'var(--accent-rose)' : 'var(--accent-cyan)',
+            marginTop: '2px',
+          }}>
+            {parsedIntent.action === 'preset' && (
+              <span>⚡ Running preset: <strong>{parsedIntent.scenario_title || parsedIntent.preset_id}</strong></span>
+            )}
+            {parsedIntent.action === 'close' && parsedIntent.road && (
+              <span>🚫 Simulating closure: <strong>{parsedIntent.road}</strong></span>
+            )}
+            {(parsedIntent.action === 'facility' || parsedIntent.action === 'add_facility') && parsedIntent.road && (
+              <span>🏥 Siting mobile triage: <strong>{parsedIntent.road}</strong></span>
+            )}
+            {parsedIntent.action === 'corridor' && parsedIntent.road && (
+              <span>🟢 Activating green wave: <strong>{parsedIntent.road}</strong></span>
+            )}
+            {(parsedIntent.action === 'reopen' || parsedIntent.action === 'coverage') && (
+              <span>🔄 Reset to baseline coverage</span>
+            )}
+            {parsedIntent.action === 'help' && (
+              <span>ℹ️ {parsedIntent.message || 'Please specify a road name or disaster preset.'}</span>
+            )}
+          </div>
         )}
       </form>
 
