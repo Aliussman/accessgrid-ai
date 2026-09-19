@@ -322,6 +322,26 @@ def _population_synthetic(graph: nx.MultiDiGraph) -> pd.DataFrame:
     return df
 
 
+def _vulnerability_shares(df: pd.DataFrame) -> pd.DataFrame:
+    """Synthetic, deterministic per-node vulnerability shares (0-1) used for
+    equity analysis. NOT real census data; keyed by node_id so the file is
+    stable across rebuilds."""
+    out = df.copy()
+    counts = {
+        "elderly": (0.06, 0.30),
+        "mobility": (0.05, 0.32),
+        "lowcar": (0.18, 0.72),
+    }
+    for group, (lo, hi) in counts.items():
+        draws = []
+        for node in out["node_id"].astype(np.int64):
+            rng = np.random.default_rng((int(node) + 11_000 * (group == "mobility")
+                                         + 23_000 * (group == "lowcar")) % (2**32))
+            draws.append(lo + rng.uniform() * (hi - lo))
+        out[group] = np.round(np.clip(np.asarray(draws), 0.0, 1.0), 3)
+    return out
+
+
 def save_population(graph: nx.MultiDiGraph) -> None:
     """Write pop_by_node.csv (raster if available, else synthetic)."""
     synthetic = True
@@ -337,9 +357,11 @@ def save_population(graph: nx.MultiDiGraph) -> None:
         df = _population_synthetic(graph)
         print(f"Population raster failed ({exc}) -> USING SYNTHETIC FALLBACK.")
 
+    df = _vulnerability_shares(df)
     df.to_csv(POP_PATH, index=False)
     print(f"Population rows written to {POP_PATH.name}: {len(df)} nodes, "
-          f"total {int(df['population'].sum()):,} (synthetic={synthetic}).")
+          f"total {int(df['population'].sum()):,} (synthetic={synthetic}); "
+          "added synthetic elderly/mobility/lowcar shares for equity analysis.")
 
 
 def write_manifest() -> None:
@@ -349,7 +371,8 @@ def write_manifest() -> None:
         "city.graphml       : drive network, largest SCC, speed_kph & travel_time(min)",
         "hospitals.geojson  : OSM amenity=hospital, snapped to nearest node;",
         "                    type (osm tag); capacity = SYNTHETIC beds (not real)",
-        "pop_by_node.csv    : node_id, population per graph node",
+        "pop_by_node.csv    : node_id, population + SYNTHETIC vulnerability shares",
+        "                    (elderly/mobility/lowcar in [0,1], NOT real census)",
         f"population source  : {'POP_RASTER=' + str(POP_RASTER_PATH) if POP_RASTER_PATH else 'SYNTHETIC FALLBACK (not real data)'}",
     ]
     (DATA_DIR / "DATA_NOTES.txt").write_text("\n".join(lines) + "\n")

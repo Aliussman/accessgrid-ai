@@ -4,4 +4,9 @@ city.graphml       : drive network, largest SCC, speed_kph & travel_time(min)
 hospitals.geojson  : OSM amenity=hospital, snapped to nearest node;
                     type (osm tag); capacity = SYNTHETIC beds (not real)
 pop_by_node.csv    : node_id, population per graph node
+                     + SYNTHETIC vulnerability shares per group:
+                     elderly (0.06-0.30), mobility (0.05-0.32),
+                     lowcar (0.18-0.80). These are NOT real census data;
+                     they are deterministic per node (seeded, stable) and
+                     used ONLY for relative equity analysis.
 population source  : SYNTHETIC FALLBACK (not real data)

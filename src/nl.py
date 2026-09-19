@@ -25,20 +25,43 @@ _ACTION_WORDS = {
                  "accessible"},
 }
 
+_FACILITY_WORDS = ("add", "add a hospital", "new hospital", "new facility",
+                   "emergency facility", "build a hospital", "build a facility",
+                   "place a hospital", "add hospital", "siting", "site a")
+_CORRIDOR_WORDS = ("emergency corridor", "priority route", "corridor",
+                   "speed up", "pedestrianize", "pedestrianise",
+                   "priority lane", "green wave")
+
 
 def parse_scenario(query: str, net: Network) -> dict:
     """Parse a planner sentence into a scenario dict.
 
     Returns one of:
-        {"action": "close", "road": str | None}         -> close a road
-        {"action": "reopen", "road": str | None}        -> clear (reopen) a road
-        {"action": "interventions"}                     -> run intervention analysis
-        {"action": "coverage"}                          -> show baseline
-        {"action": "help", "roads": list}               -> ask for a road name
+        {"action": "close", "road": str | None}   -> close a road
+        {"action": "reopen", "road": str | None}  -> clear (reopen) a road
+        {"action": "add_facility", "road": str}   -> add an emergency facility
+        {"action": "corridor", "road": str}       -> priority route along a road
+        {"action": "interventions"}               -> run intervention analysis
+        {"action": "coverage"}                    -> show baseline
+        {"action": "help", "roads": list}         -> ask for a road name
     """
     q = query.strip()
     if not q:
         return {"action": "help", "roads": [], "question": q}
+
+    lower = q.lower()
+    if _match_interventions(lower):
+        return {"action": "interventions", "question": q}
+    if any(w in lower for w in _FACILITY_WORDS):
+        road = _match_road(q, net)
+        if road:
+            return {"action": "add_facility", "road": road, "question": q}
+        return {"action": "help", "roads": _top_roads(net), "question": q}
+    if any(w in lower for w in _CORRIDOR_WORDS):
+        road = _match_road(q, net)
+        if road:
+            return {"action": "corridor", "road": road, "question": q}
+        return {"action": "help", "roads": _top_roads(net), "question": q}
 
     action = _classify_action(q)
     if action == "interventions":
@@ -74,7 +97,8 @@ def _classify_action(query: str) -> str:
 def _match_interventions(lower: str) -> bool:
     return bool(re.search(
         r"(intervention|which (intervention |one )?helps|which .* (helps|restore|fix|recover)|"
-        r"what .* (intervention|help|fix)|best .*(intervention|way)|help[s]? most)", lower
+        r"what .* (intervention|help|fix)|best .*(intervention|way)|help[s]? most|"
+        r"minimi[sz]e[s]? .*(loss|debt|impact|access)|reduce[s]? .*(loss|debt|impact))", lower
     ))
 
 

@@ -56,15 +56,32 @@ def load_population() -> dict[int, int]:
     return dict(zip(df["node_id"].astype(int), df["population"].astype(int)))
 
 
+def load_vulnerability() -> dict[int, dict[str, float]]:
+    """Per-node vulnerability shares (elderly/mobility-limited/low-car
+    households) read from pop_by_node.csv. Fuzzy either way is fine: the
+    shares are SYNTHETIC and only used for relative equity analysis."""
+    df = pd.read_csv(POP_PATH)
+    vuln: dict[int, dict[str, float]] = {}
+    for row in df.itertuples(index=False):
+        node = int(row.node_id)
+        vuln[node] = {
+            group: float(getattr(row, group, 0.0) or 0.0)
+            for group in ("elderly", "mobility", "lowcar")
+        }
+    return vuln
+
+
 @dataclass
 class Network:
     graph: nx.MultiGraph
     hospitals: gpd.GeoDataFrame
     population: dict[int, int] = field(default_factory=dict)
+    vulnerability: dict[int, dict[str, float]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, data_dir=None) -> "Network":
-        return cls(graph=load_graph(), hospitals=load_hospitals(), population=load_population())
+        return cls(graph=load_graph(), hospitals=load_hospitals(),
+                   population=load_population(), vulnerability=load_vulnerability())
 
 
 # --------------------------------------------------------------------------
@@ -231,14 +248,25 @@ def _classify(
     population: dict,
     threshold: float,
     osm_by_node: dict[int, str],
+    vulnerability: Optional[dict[int, dict[str, float]]] = None,
 ) -> dict:
-    """Classify every node vs the baseline and return the impact fields."""
+    """Classify every node vs the baseline and return the impact fields.
+
+    Accessibility Debt (pop-minutes) is the population-weighted sum of
+    travel-time deterioration:
+        AD = sum_i P_i * (T_scenario,i - T_baseline,i)
+    Nodes that lose all access (< threshold before, unreachable / above
+    threshold after) are charged the synthetic value (old + threshold) so the
+    debt stays finite and comparable across scenarios.
+    """
+    vulnerability = vulnerability or {}
     added: dict[int, float] = {}
     lost_nodes: list[int] = []
     zone_impact: dict[int, float] = {}
     lost_per_hospital: dict[str, int] = {}
     pop_affected = pop_lost_coverage = pop_worsened = 0
     old_time = baseline["node_time"]
+    equity: dict[str, dict] = {}
 
     for n, old in old_time.items():
         if old == INF:
@@ -279,10 +307,71 @@ def _classify(
         den += population.get(n, 0)
     avg_after = num / den if den else float("nan")
 
+    groups = {"general": None, "elderly": 0, "mobility": 0, "lowcar": 0}
+    for group, idx in groups.items():
+        if group == "general":
+            before_sum = sum(
+                old * population.get(n, 0)
+                for n, old in old_time.items() if old != INF
+            )
+            after_sum = sum(
+                new_time[n] * population.get(n, 0)
+                for n, old in old_time.items()
+                if old != INF and new_time.get(n, INF) != INF
+            )
+            group_pop = sum(
+                population.get(n, 0)
+                for n, old in old_time.items() if old != INF
+            )
+            after_pop = sum(
+                population.get(n, 0)
+                for n, old in old_time.items()
+                if old != INF and new_time.get(n, INF) != INF
+            )
+            lost_pop = pop_lost_coverage
+        else:
+            w_sum = b_sum = a_sum = lost_pop = 0.0
+            for n, shares in vulnerability.items():
+                share = shares.get(group, 0.0) if shares else 0.0
+                old = old_time.get(n, INF)
+                if old == INF or share <= 0.0:
+                    continue
+                pop = population.get(n, 0) * share
+                new = new_time.get(n, INF)
+                w_sum += pop
+                b_sum += pop * old
+                if new == INF or old <= threshold < new:
+                    lost_pop += pop
+                elif new != INF:
+                    a_sum += pop * new
+            group_pop, before_sum, after_sum, after_pop = w_sum, b_sum, a_sum, (w_sum - lost_pop)
+        before_avg = before_sum / group_pop if group_pop else float("nan")
+        after_avg = after_sum / after_pop if after_pop else float("nan")
+        delta = (after_avg - before_avg) if (after_avg == after_avg and before_avg == before_avg) else float("nan")
+        equity[group] = {
+            "group": group,
+            "group_pop": float(group_pop),
+            "pop_lost_coverage": float(lost_pop),
+            "before_avg_min": float(before_avg),
+            "after_avg_min": float(after_avg),
+            "delta_min": float(delta),
+        }
+
+    gen_delta = equity["general"]["delta_min"]
+    disproportionately = [
+        g for g in ("elderly", "mobility", "lowcar")
+        if equity[g]["pop_lost_coverage"] > 0
+        and gen_delta == gen_delta
+        and equity[g]["delta_min"] == equity[g]["delta_min"]
+        and equity[g]["delta_min"] > gen_delta * 1.15
+    ]
+    equity["disproportionately_affected"] = disproportionately
+
     max_z = max(zone_impact.values()) if zone_impact else 0.0
     zone_impact_score = (
         {n: (v / max_z * 100.0) for n, v in zone_impact.items()} if max_z else {}
     )
+    debt = float(sum(zone_impact.values()))
 
     return {
         "pop_affected": int(pop_affected),
@@ -296,6 +385,9 @@ def _classify(
         "zone_impact_score": zone_impact_score,
         "lost_nodes": lost_nodes,
         "hospitals_lost": lost_per_hospital,
+        "debt_pop_minutes": debt,
+        "per_capita_debt_min": (debt / pop_affected) if pop_affected else 0.0,
+        "equity": equity,
     }
 
 
@@ -305,17 +397,26 @@ def _evaluate_modification(
     threshold: float,
     remove_edges: list[tuple[int, int]],
     boost_edges: list[tuple[int, int, float]] = (),
+    extra_sources: list[int] = (),
 ) -> dict:
     """Impact of a graph modification (closures + corridor boosts) relative
-    to the baseline."""
+    to the baseline. ``extra_sources`` adds nodes as emergency facilities."""
     work = _work_graph(net, remove_edges, boost_edges)
-    sources = [int(n) for n in net.hospitals["node_id"]]
+    sources = [int(n) for n in net.hospitals["node_id"]] + [int(s) for s in extra_sources]
     new_time, _ = nearest_hospitals(work, sources)
     osm_by_node = {
         int(row["node_id"]): str(row["osm_id"])
         for _, row in net.hospitals.iterrows()
     }
-    return _classify(baseline, new_time, net.population, threshold, osm_by_node)
+    fields = _classify(baseline, new_time, net.population, threshold, osm_by_node,
+                       net.vulnerability)
+    base_time = baseline["node_time"]
+    fields["new_covered_pop"] = sum(
+        net.population.get(n, 0)
+        for n in net.graph.nodes
+        if base_time.get(n, INF) > threshold and new_time.get(n, INF) <= threshold
+    )
+    return fields
 
 
 def interventions(
@@ -352,6 +453,7 @@ def interventions(
     disrupted = _evaluate_modification(net, baseline, threshold, closed, [])
     if disrupted["pop_affected"] == 0:
         return []
+    disrupted_debt = disrupted["debt_pop_minutes"]
     lost_set_ref = disrupted["pop_lost_coverage"]
     affected_ref = disrupted["pop_affected"]
 
@@ -422,6 +524,7 @@ def interventions(
             recovery = restored / lost_set_ref * 100.0
         else:
             recovery = recovered_affected / affected_ref * 100.0 if affected_ref else 0.0
+        debt_after = float(f["debt_pop_minutes"])
         results.append({
             "kind": cand["kind"],
             "name": cand["name"],
@@ -431,6 +534,9 @@ def interventions(
             "population_recovered": int(recovered_affected),
             "avg_time_saved_min": float(avg_saved),
             "accessibility_recovery_pct": float(recovery),
+            "debt_after_pop_min": debt_after,
+            "debt_reduction_pct": (disrupted_debt - debt_after) / disrupted_debt * 100.0
+            if disrupted_debt else 0.0,
         })
 
     _score_interventions(results)
@@ -593,5 +699,128 @@ def intervention_outcome(
         "threshold": float(threshold),
         "closed_edges": [(int(u), int(v)) for u, v in intervention["remove_edges"]],
         "baseline_covered_pop": int(baseline["covered_pop"]),
+        **fields,
+    }
+
+
+# --------------------------------------------------------------------------
+# What-if helpers (beyond road closures)
+# --------------------------------------------------------------------------
+def coverage_with_facility(
+    net: Network,
+    facility_node: int,
+    threshold: float = DEFAULT_THRESHOLD_MIN,
+    baseline: Optional[dict] = None,
+) -> dict:
+    """Baseline coverage if an emergency facility is added at ``facility_node``.
+
+    Returns the same shape as ``coverage()`` (with hospitals replaced by all
+    sources) plus ``new_covered_pop``: residents newly within the threshold
+    who were not covered by the existing hospital network."""
+    if baseline is None:
+        baseline = coverage(net, threshold)
+    facility_node = int(facility_node)
+    sources = [int(n) for n in net.hospitals["node_id"]] + [facility_node]
+    time, hospital = nearest_hospitals(net.graph, sources)
+
+    total_pop = sum((net.population.get(n, 0) for n in net.graph.nodes), 0)
+    covered_pop = sum(
+        (net.population.get(n, 0) for n in net.graph.nodes
+         if time.get(n, INF) <= threshold), 0
+    )
+    base_time = baseline["node_time"]
+    new_covered_pop = sum(
+        (net.population.get(n, 0) for n in net.graph.nodes
+         if base_time.get(n, INF) > threshold and time.get(n, INF) <= threshold), 0
+    )
+    finite_pop = sum((net.population.get(n, 0) for n in time if time[n] != INF), 0)
+    avg_access = (
+        sum(time[n] * net.population.get(n, 0) for n in time if time[n] != INF)
+        / finite_pop if finite_pop else float("nan")
+    )
+    facility_covered = sum(
+        (net.population.get(n, 0) for n, hn in hospital.items()
+         if hn == facility_node and time.get(n, INF) <= threshold), 0
+    )
+    x, y = net.graph.nodes[facility_node]["x"], net.graph.nodes[facility_node]["y"]
+    return {
+        "threshold": float(threshold),
+        "total_pop": int(total_pop),
+        "covered_pop": int(covered_pop),
+        "new_covered_pop": int(new_covered_pop),
+        "covered_pop_after": int(covered_pop),
+        "facility_node": facility_node,
+        "facility_lon": float(x),
+        "facility_lat": float(y),
+        "facility_covered_pop": int(facility_covered),
+        "coverage_pct": (covered_pop / total_pop * 100.0) if total_pop else 0.0,
+        "avg_access_min": float(avg_access),
+        "hospitals": list(baseline["hospitals"]),
+        "node_time": time,
+        "node_hospital": hospital,
+    }
+
+
+def add_facility_to_closure(
+    net: Network,
+    facility_node: int,
+    closed_edges: list[tuple[int, int]],
+    threshold: float = DEFAULT_THRESHOLD_MIN,
+    baseline: Optional[dict] = None,
+) -> dict:
+    """Impact of a road closure *plus* an emergency facility at a location.
+
+    Same output shape as ``closure_impact``: measures the accessibility debt
+    that remains even after the new facility is open, and how much debt the
+    facility prevents.""" 
+    if baseline is None:
+        baseline = coverage(net, threshold)
+    closed = sorted(set((min(u, v), max(u, v)) for u, v in closed_edges))
+    disrupted = _evaluate_modification(net, baseline, threshold, closed, [])
+    fields = _evaluate_modification(net, baseline, threshold, closed, [],
+                                    extra_sources=[int(facility_node)])
+    facility_node = int(facility_node)
+    x, y = net.graph.nodes[facility_node]["x"], net.graph.nodes[facility_node]["y"]
+    debt_prevented = displaced = disrupted["debt_pop_minutes"]
+    return {
+        "threshold": float(threshold),
+        "closed_edges": [(int(u), int(v)) for u, v in closed],
+        "baseline_covered_pop": int(baseline["covered_pop"]),
+        "facility_node": facility_node,
+        "facility_lon": float(x),
+        "facility_lat": float(y),
+        "debt_without_facility_pop_min": disrupted["debt_pop_minutes"],
+        "debt_prevented_pop_min": max(debt_prevented - fields["debt_pop_minutes"], 0.0),
+        "debt_prevented_pct": (debt_prevented - fields["debt_pop_minutes"]) / displaced * 100.0
+        if displaced else 0.0,
+        **fields,
+    }
+
+
+def corridor_road(
+    net: Network,
+    road_name: str,
+    factor: float = 0.7,
+    threshold: float = DEFAULT_THRESHOLD_MIN,
+    closed_edges: list[tuple[int, int]] = (),
+    baseline: Optional[dict] = None,
+) -> dict:
+    """What-if: priority travel (emergency corridor) along a named road.
+
+    Speeds up every segment of ``road_name`` by ``factor`` (boost<1 shortens
+    travel time), optionally while ``closed_edges`` stay closed. Returns a
+    ``closure_impact``-shaped dict so the map/metrics render the result."""
+    if baseline is None:
+        baseline = coverage(net, threshold)
+    closed = sorted(set((min(u, v), max(u, v)) for u, v in closed_edges))
+    segs = road_edges(net.graph, road_name)
+    fields = _evaluate_modification(net, baseline, threshold, closed,
+                                    [(u, v, float(factor)) for u, v in segs])
+    return {
+        "threshold": float(threshold),
+        "closed_edges": [(int(u), int(v)) for u, v in closed],
+        "baseline_covered_pop": int(baseline["covered_pop"]),
+        "road_name": road_name,
+        "corridor_factor": float(factor),
         **fields,
     }

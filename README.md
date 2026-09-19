@@ -33,12 +33,28 @@ Built for a 24 h AI-for-Good hackathon (Urban Planning track).
 - **Criticality** — precomputed per-edge risk (route usage + exact single-edge
   closure for top-150 edges, threshold 10 min at precompute time) shown as
   "Riskiest corridors".
+- **What-if engine** — beyond road closure you can also test **"add an
+  emergency facility"** (sites it on the most central junction of a chosen
+  road and shows newly within-threshold residents + debt prevented) and
+  **"emergency corridor"** (0.7× travel time along a chosen road, an
+  emergency-only priority route).
+- **Accessibility Debt (AD)** — every scenario reports its
+  **pop-min accessibility debt** `AD = Σ P_i × (T_i,after − T_i,before)` and
+  per-capita debt, so interventions can be compared as "how much plain
+  accessibility did this restore".
+- **Equity analysis** — population-group-aware: elderly / mobility-limited /
+  low-car shares are read from `pop_by_node.csv`, and every impact breaks out
+  the travel-time change and lost coverage per group, flagging when a
+  disruption *disproportionately* affects a vulnerable group.
+- **Interventions** — the engine ranks ways to restore access (reopen all,
+  reopen each segment, or an emergency corridor), each reporting debt
+  reduction to go with restored/recovered population.
 - **AI briefing** — concise analyst-style closure summary and intervention
   recommendation from Google Gemini, with a deterministic template fallback
   when offline.
-- Synthetic (formula-based) population when no raster is configured, clearly
-  labelled and flagged with a banner in the UI. Hospital bed capacity is
-  synthetic too.
+- Synthetic (formula-based) population and bed counts are clearly labelled
+  and flagged in the UI when no real raster is configured, as are the
+  vulnerability shares (synthetic, not census).
 
 ## Quick start
 

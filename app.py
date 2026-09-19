@@ -1,11 +1,11 @@
 """AccessGrid - Streamlit map UI.
 
-A planner closes road segments (by drawing on the map or picking a named
-road), the engine recomputes hospital coverage, and the app shows the
-before/after accessibility impact, the most-affected zones, ranked
-interventions that restore access, and an AI/natural-language briefing.
+A what-if engine for equitable urban accessibility. A planner simulates a
+city change (road closure, emergency corridor, new facility), the engine
+measures WHO loses access (accessibility debt by zone and by vulnerability
+group), and the app compares interventions that minimise that loss.
 
-Layout mirrors the MVP spec: Overview / Simulate / Impact / Interventions.
+Layout: Overview / Simulate / Impact / Interventions.
 """
 from __future__ import annotations
 
@@ -30,7 +30,9 @@ from src.config import (
 )
 from src.engine import (
     Network,
+    add_facility_to_closure,
     closure_impact,
+    corridor_road,
     coverage,
     intervention_outcome,
     interventions,
@@ -111,6 +113,21 @@ def run_intervention_outcome(closed_tuple: tuple, threshold: float,
 
 
 @st.cache_data(show_spinner=False)
+def run_facility(closed_tuple: tuple, threshold: float,
+                 facility_node: int) -> dict:
+    net, _, _ = get_network()
+    return add_facility_to_closure(net, facility_node, list(closed_tuple),
+                                   threshold, run_coverage(threshold))
+
+
+@st.cache_data(show_spinner=False)
+def run_corridor(closed_tuple: tuple, threshold: float, road: str) -> dict:
+    net, _, _ = get_network()
+    return corridor_road(net, road, 0.7, threshold, list(closed_tuple),
+                         run_coverage(threshold))
+
+
+@st.cache_data(show_spinner=False)
 def road_names() -> list[str]:
     net, _, _ = get_network()
     return [r["name"] for r in named_roads(net.graph)]
@@ -176,7 +193,8 @@ def _edge_line(u: int, v: int) -> LineString | None:
 
 
 def build_map(net: Network, snap: dict, impact: dict | None, *,
-              boosts: list | None = None, draw_controls: bool = True) -> folium.Map:
+              boosts: list | None = None, improved_nodes: list | None = None,
+              draw_controls: bool = True) -> folium.Map:
     m = folium.Map(location=(float(CENTRE_LAT), float(CENTRE_LON)),
                    zoom_start=12, tiles="CartoDB positron", control_scale=True)
     Fullscreen().add_to(m)
@@ -253,6 +271,31 @@ def build_map(net: Network, snap: dict, impact: dict | None, *,
                                 popup=f"<b>{label}</b>").add_to(affected)
         layers.append(affected)
 
+        if "facility_node" in impact \
+                and impact.get("facility_node") is not None:
+            fac_layer = folium.FeatureGroup(name="Emergency facility")
+            fn = int(impact["facility_node"])
+            try:
+                x, y = _node_xy(net, fn)
+            except KeyError:
+                x, y = impact.get("facility_lon"), impact.get("facility_lat")
+            folium.Marker((y, x), icon=folium.Icon(color="purple", icon="plus",
+                                                   prefix="fa"),
+                          popup="<b>Proposed emergency facility</b>").add_to(fac_layer)
+            layers.append(fac_layer)
+
+    if improved_nodes:
+        improved = folium.FeatureGroup(name="Improved access")
+        for n in improved_nodes[:2500]:
+            try:
+                x, y = _node_xy(net, n)
+            except KeyError:
+                continue
+            folium.CircleMarker((y, x), radius=4, color="black", weight=0.5,
+                                fill=True, fill_color="green", fill_opacity=0.75,
+                                popup=f"<b>Improved access</b>").add_to(improved)
+        layers.append(improved)
+
     folium.LayerControl().add_to(m)
     for layer in layers:
         m.add_child(layer)
@@ -268,6 +311,34 @@ def build_map(net: Network, snap: dict, impact: dict | None, *,
 def _node_xy(net: Network, n: int):
     d = net.graph.nodes[n]
     return float(d["x"]), float(d["y"])
+
+
+def facility_node_for_road(net: Network, road_name: str) -> int | None:
+    """Where to place an emergency facility for a given road: the segment
+    endpoint closest to the road's midpoint (its most central junction)."""
+    segs = road_edges(net.graph, road_name)
+    if not segs:
+        return None
+    xs, ys = [], []
+    for u, v in segs:
+        try:
+            xu, yu = _node_xy(net, u)
+            xv, yv = _node_xy(net, v)
+        except KeyError:
+            continue
+        xs += [xu, xv]
+        ys += [yu, yv]
+    if not xs:
+        return None
+    cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+    best, best_d = None, INF
+    for n in {p for s in segs for p in s}:
+        if n in net.graph.nodes:
+            x, y = _node_xy(net, n)
+            d = (x - cx) ** 2 + (y - cy) ** 2
+            if d < best_d:
+                best, best_d = n, d
+    return best
 
 
 # --------------------------------------------------------------------------
@@ -292,14 +363,39 @@ def most_affected_zones(net: Network, impact: dict, top: int = 10) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
+def equity_table(impact: dict) -> pd.DataFrame:
+    """Per-vulnerability-group accessibility impact (who loses access)."""
+    groups = ["general", "elderly", "mobility", "lowcar"]
+    eq = impact.get("equity", {})
+    rows = []
+    for g in groups:
+        d = eq.get(g)
+        if not d:
+            continue
+        rows.append({
+            "Population group": {
+                "general": "General", "elderly": "Elderly (65+)",
+                "mobility": "Mobility-limited", "lowcar": "Low-car households",
+            }[g],
+            "Group population": f"{d['group_pop']:,.0f}",
+            "Avg access before (min)": f"{d['before_avg_min']:.1f}",
+            "Avg access after (min)": f"{d['after_avg_min']:.1f}",
+            "Change (min)": f"+{d['delta_min']:.1f}" if d["delta_min"] > 0
+            else f"{d['delta_min']:.1f}",
+            "Lose coverage": f"{d['pop_lost_coverage']:,.0f}",
+        })
+    return pd.DataFrame(rows)
+
+
 # --------------------------------------------------------------------------
 # App
 # --------------------------------------------------------------------------
 def main() -> None:
-    st.title("AccessGrid - Urban Accessibility Digital Twin")
-    st.caption("Mock study area: Mohali / Chandigarh / Panchkula road network. "
-               "Simulate a road disruption and test interventions that restore "
-               "hospital access.")
+    st.title("AccessGrid AI - a what-if engine for equitable urban access")
+    st.caption("Simulate a city change (road closure, emergency corridor, new "
+               "facility) -> measure who loses access -> test interventions "
+               "that minimise the loss.")
+    st.caption("Mock study area: Mohali / Chandigarh / Panchkula road network.")
 
     net, edge_lines, _ = get_network()
     if "closed_edges" not in st.session_state:
@@ -310,8 +406,15 @@ def main() -> None:
         st.session_state.active_intervention = None
     if "handled_drawing" not in st.session_state:
         st.session_state.handled_drawing = ""
+    if "scenario" not in st.session_state:
+        st.session_state.scenario = "closure"
+    if "scenario_road" not in st.session_state:
+        st.session_state.scenario_road = None
+    if "facility_node" not in st.session_state:
+        st.session_state.facility_node = None
     closed = st.session_state.closed_edges
     closed_road = st.session_state.closed_road
+    scenario = st.session_state.scenario
 
     # --- Sidebar: settings + natural-language input -----------------------
     st.sidebar.header("Settings")
@@ -324,13 +427,26 @@ def main() -> None:
 
     if POP_RASTER_PATH is None:
         st.sidebar.warning("Population is SYNTHETIC (formula-based), not real "
-                          "survey / WorldPop data. Hospital bed counts are "
-                          "synthetic too.")
+                          "survey / WorldPop data. Hospital bed counts and "
+                          "vulnerability shares (elderly / mobility-limited / "
+                          "low-car) are synthetic too.")
 
     snap = run_coverage(float(threshold))
-    impact = run_impact(tuple(sorted(closed)), float(threshold)) if closed else None
-    candidates = (run_interventions(tuple(sorted(closed)), float(threshold))
-                  if closed else [])
+
+    # Current scenario result depends on the active scenario type.
+    if scenario == "facility" and st.session_state.facility_node is not None:
+        impact = run_facility(tuple(sorted(closed)), float(threshold),
+                              int(st.session_state.facility_node))
+        candidates = []
+    elif scenario == "corridor" and st.session_state.scenario_road:
+        impact = run_corridor(tuple(sorted(closed)), float(threshold),
+                              st.session_state.scenario_road)
+        candidates = []
+    else:
+        st.session_state.scenario = "closure"
+        impact = run_impact(tuple(sorted(closed)), float(threshold)) if closed else None
+        candidates = (run_interventions(tuple(sorted(closed)), float(threshold))
+                      if closed else [])
 
     st.sidebar.subheader("Ask AccessGrid")
     query = st.sidebar.text_input(
@@ -348,6 +464,7 @@ def main() -> None:
                 st.session_state.closed_edges = set(segs)
                 st.session_state.closed_road = intent["road"]
                 st.session_state.active_intervention = None
+                st.session_state.scenario = "closure"
                 st.rerun()
         elif intent["action"] == "reopen" and intent.get("road"):
             segs = road_edges(net.graph, intent["road"])
@@ -356,6 +473,23 @@ def main() -> None:
                 if not st.session_state.closed_edges:
                     st.session_state.closed_road = None
                 st.session_state.active_intervention = None
+                st.session_state.scenario = "closure"
+                st.rerun()
+        elif intent["action"] == "add_facility" and intent.get("road"):
+            fn = facility_node_for_road(net, intent["road"])
+            if fn is not None and st.sidebar.button("Run suggested facility"):
+                st.session_state.facility_node = fn
+                st.session_state.scenario_road = intent["road"]
+                st.session_state.scenario = "facility"
+                st.session_state.active_intervention = None
+                st.session_state.closed_road = None
+                st.rerun()
+        elif intent["action"] == "corridor" and intent.get("road"):
+            if st.sidebar.button("Run suggested corridor"):
+                st.session_state.scenario_road = intent["road"]
+                st.session_state.scenario = "corridor"
+                st.session_state.active_intervention = None
+                st.session_state.closed_road = None
                 st.rerun()
         elif intent["action"] == "interventions":
             st.sidebar.caption("Intervention analysis runs automatically in the "
@@ -372,22 +506,40 @@ def main() -> None:
         _overview_page(net, snap, threshold)
 
     with tab_simulate:
-        _simulate_page(net, edge_lines, snap, threshold, closed, closed_road)
+        _simulate_page(net, edge_lines, snap, threshold, closed, closed_road,
+                       scenario)
 
     with tab_impact:
-        _impact_page(net, snap, impact, threshold)
+        _impact_page(net, snap, impact, threshold, scenario)
 
     with tab_interventions:
-        _interventions_page(net, snap, impact, threshold, closed, candidates)
+        _interventions_page(net, snap, impact, threshold, closed, candidates,
+                            scenario)
 
-    _sidebar_briefing(impact, candidates, net, closed_road)
+    if impact is not None:
+        _sidebar_briefing(impact, candidates, net, closed_road)
 
 
 def _sidebar_briefing(impact, candidates, net, closed_road) -> None:
     st.sidebar.subheader("Closure briefing")
     if impact is None:
-        st.sidebar.markdown("Close a road in the Simulate tab to see the "
-                            "impact briefing here.")
+        st.sidebar.markdown("Run a scenario in the Simulate tab to see the "
+                            "briefing here.")
+        return
+    scenario = st.session_state.scenario
+    if scenario != "closure":
+        if scenario == "facility":
+            st.sidebar.info(
+                f"Facility near {st.session_state.scenario_road} prevents "
+                f"{impact.get('debt_prevented_pop_min', 0.0):,.0f} pop-min of "
+                f"debt and newly covers {int(impact.get('new_covered_pop', 0)):,} "
+                f"residents within {int(impact['threshold'])} min.")
+        else:
+            st.sidebar.info(
+                f"Corridor along {st.session_state.scenario_road} changes avg "
+                f"access by "
+                f"{impact['avg_access_after'] - impact['avg_access_before']:+.1f} "
+                f"min. Close a road to compare interventions.")
         return
     result = summarize_closure(impact, net, candidates)
     st.sidebar.info(f"Provider: {result['provider']}")
@@ -410,42 +562,80 @@ def _overview_page(net, snap, threshold) -> None:
     st_folium(m, height=560, use_container_width=True, key="overview_map")
 
 
-def _simulate_page(net, edge_lines, snap, threshold, closed, closed_road) -> dict | None:
-    st.subheader("Simulate disruption")
+def _simulate_page(net, edge_lines, snap, threshold, closed, closed_road,
+                   scenario) -> dict | None:
+    st.subheader("Simulate a city change")
+    st.markdown(
+        "Choose what the city does, then see **who loses access** in the "
+        "Impact tab and **which intervention minimises the loss** in the "
+        "Interventions tab.")
     left, right = st.columns([1, 2])
 
     with left:
+        scenario_choice = st.radio(
+            "What-if scenario",
+            ["Road closure", "Add emergency facility", "Emergency corridor"],
+            index=0 if scenario == "closure" else
+            (1 if scenario == "facility" else 2))
         mode = st.radio("Scenario input", ["Pick a named road", "Draw on the map"],
                         index=0)
-        if mode == "Pick a named road":
-            names = road_names()
-            chosen = st.selectbox("Select road", [""] + names,
-                                  format_func=lambda x: x or "Choose a road...")
-            run = st.button("RUN SIMULATION", type="primary",
-                            disabled=not chosen)
-            if run and chosen:
-                segs = road_edges(net.graph, chosen)
+        names = road_names()
+        chosen = st.selectbox("Select road", [""] + names,
+                              format_func=lambda x: x or "Choose a road...")
+        run = st.button("RUN SIMULATION", type="primary",
+                        disabled=not chosen)
+
+        def _run_scenario(choice: str, road: str) -> None:
+            if choice == "Road closure":
+                segs = road_edges(net.graph, road)
                 if segs:
                     st.session_state.closed_edges = set(segs)
-                    st.session_state.closed_road = chosen
-                    st.session_state.active_intervention = None
-                    st.rerun()
-        else:
+                    st.session_state.closed_road = road
+                    st.session_state.scenario = "closure"
+            elif choice == "Add emergency facility":
+                fn = facility_node_for_road(net, road)
+                if fn is not None:
+                    st.session_state.scenario = "facility"
+                    st.session_state.scenario_road = road
+                    st.session_state.facility_node = fn
+                    st.session_state.closed_road = None
+            else:
+                st.session_state.scenario = "corridor"
+                st.session_state.scenario_road = road
+                st.session_state.closed_road = None
+            st.session_state.active_intervention = None
+            st.rerun()
+
+        if run and chosen:
+            _run_scenario(scenario_choice, chosen)
+
+        if mode == "Draw on the map":
             st.caption("Draw a red line over roads on the map to close them. "
                        "Segments within ~130 m of the line are closed.")
         if closed:
             st.button("Clear all closures", on_click=_clear_state)
 
     impact = None
-    if closed:
+    if scenario == "facility" and st.session_state.facility_node is not None:
+        impact = run_facility(tuple(sorted(closed)), float(threshold),
+                              int(st.session_state.facility_node))
+    elif scenario == "corridor" and st.session_state.scenario_road:
+        impact = run_corridor(tuple(sorted(closed)), float(threshold),
+                              st.session_state.scenario_road)
+    elif closed:
         impact = run_impact(tuple(sorted(closed)), float(threshold))
 
     with right:
-        if closed:
-            _before_after(net, snap, impact, threshold, closed_road)
-            impact_map = build_map(net, snap, impact)
+        if impact is not None:
+            _before_after(net, snap, impact, threshold, closed_road, scenario)
+            improved = _improved_nodes(snap, impact)
+            boosts = None
+            if scenario == "corridor" and st.session_state.scenario_road:
+                boosts = road_edges(net.graph, st.session_state.scenario_road)
+            impact_map = build_map(net, snap, impact, boosts=boosts,
+                                   improved_nodes=improved)
         else:
-            st.info("No closure yet. Pick a road and run the simulation, or "
+            st.info("No scenario yet. Pick a road and run the simulation, or "
                     "draw a line over the map, to start.")
             impact_map = build_map(net, snap, None)
 
@@ -457,44 +647,119 @@ def _simulate_page(net, edge_lines, snap, threshold, closed, closed_road) -> dic
         if fp and fp != st.session_state.handled_drawing:
             new_matches = close_edges_for_drawing(drawing, edge_lines)
             if new_matches:
+                if st.session_state.scenario != "closure":
+                    st.session_state.scenario = "closure"
+                    st.session_state.scenario_road = None
+                    st.session_state.facility_node = None
                 st.session_state.closed_edges |= new_matches
                 st.session_state.closed_road = None
                 st.session_state.active_intervention = None
                 st.session_state.handled_drawing = fp
                 st.rerun()
 
-    if closed:
+    if impact is not None:
         return impact
     return None
 
 
-def _before_after(net, snap, impact, threshold, closed_road) -> None:
-    col1, col2, col3 = st.columns(3)
+def _improved_nodes(snap: dict, impact: dict) -> list:
+    """Nodes whose access got *better* than baseline by > 1 min (e.g. after a
+    new facility or an emergency corridor)."""
+    base = snap.get("node_time", {})
+    new = impact.get("node_time", {})
+    out = [n for n, t in new.items() if base.get(n, INF) - t > 1.0]
+    return sorted(out, key=lambda n: -(base.get(n, INF) - new.get(n, INF)))
+
+
+def _before_after(net, snap, impact, threshold, closed_road, scenario) -> None:
+    improving = scenario in ("facility", "corridor") and \
+        impact.get("pop_affected", 1) == 0
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Baseline avg access time",
                 f"{impact['avg_access_before']:.1f} min")
     delta = impact["avg_access_after"] - impact["avg_access_before"]
-    col2.metric("Disrupted avg access time",
-                f"{impact['avg_access_after']:.1f} min",
-                delta=f"+{delta:.1f} min")
+    label = "After: avg access time"
+    if improving:
+        label = "After: avg access time"
+    col2.metric(label, f"{impact['avg_access_after']:.1f} min",
+                delta=f"{delta:+.1f} min")
+    debt = impact.get("debt_pop_minutes", 0.0)
+    col3.metric("Accessibility debt", f"{debt:,.0f} pop-min",
+                help="Population-weighted sum of travel-time deterioration "
+                     "(AD = sum P_i * (T_after - T_before)). The cost a "
+                     "change imposes on residents' access.")
     lost = impact["pop_lost_coverage"]
-    col3.metric("Population within %d min" % threshold,
-                f"{snap['covered_pop'] - lost:,}",
-                delta=f"-{lost:,}", delta_color="inverse")
-    st.caption(f"Disruption: {closed_road or len(impact['closed_edges'])} road "
-               f"segment(s) closed · {impact['pop_affected']:,} people affected · "
-               f"{lost:,} lose coverage · {impact['pop_worsened']:,} delayed.")
+    newly_covered = int(impact.get("new_covered_pop", 0))
+    if improving:
+        col4.metric("Population within %d min" % threshold,
+                    f"{snap['covered_pop'] - lost + newly_covered:,}",
+                    delta=f"+{newly_covered:,}" if newly_covered else None)
+    else:
+        col4.metric("Population within %d min" % threshold,
+                    f"{snap['covered_pop'] - lost:,}",
+                    delta=f"-{lost:,}", delta_color="inverse")
+    if scenario == "closure":
+        st.caption(f"Disruption: {closed_road or len(impact['closed_edges'])} "
+                   f"road segment(s) closed · {impact['pop_affected']:,} people "
+                   f"affected · {lost:,} lose coverage · "
+                   f"{impact['pop_worsened']:,} delayed.")
+    elif scenario == "facility":
+        st.caption(f"Proposed emergency corridor CONCEPT: new facility placed "
+                   f"near {st.session_state.scenario_road} · "
+                   f"{int(impact.get('new_covered_pop', 0)):,} residents "
+                   f"newly within {threshold} min · "
+                   f"debt prevented "
+                   f"{impact.get('debt_prevented_pop_min', 0.0):,.0f} pop-min.")
+    else:
+        st.caption(f"Emergency corridor: priority travel along "
+                   f"{st.session_state.scenario_road} (0.7x travel time) · "
+                   f"access improved for residents whose avg access fell "
+                   f"{delta:+.1f} min.")
 
 
-def _impact_page(net, snap, impact, threshold) -> None:
+def _impact_page(net, snap, impact, threshold, scenario) -> None:
     st.subheader("Impact analysis")
     if impact is None:
-        st.info("Close a road in the Simulate tab to see impact here.")
+        st.info("Run a scenario in the Simulate tab to see impact here.")
         return
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Affected population", f"{impact['pop_affected']:,}")
     col2.metric("Lost coverage", f"{impact['pop_lost_coverage']:,}")
     col3.metric("Delayed but served", f"{impact['pop_worsened']:,}")
     col4.metric("Hospitals affected", f"{impact['hospitals_affected']}")
+
+    col1a, col2a, col3a = st.columns([1, 1, 1])
+    debt = impact.get("debt_pop_minutes", 0.0)
+    per_cap = impact.get("per_capita_debt_min", 0.0)
+    col1a.metric("Accessibility debt", f"{debt:,.0f} pop-min",
+                 delta=f"{per_cap:+.1f} min / affected person",
+                 help="AD = sum P_i x (T_scenario,i - T_baseline,i). The "
+                      "population-weighted cost of a city change.")
+    if scenario == "facility":
+        col2a.metric("Debt prevented by facility",
+                     f"{impact.get('debt_prevented_pop_min', 0.0):,.0f} pop-min")
+        col3a.metric("Newly covered",
+                     f"{int(impact.get('new_covered_pop', 0)):,}")
+    else:
+        col2a.metric("Debt per affected person",
+                     f"{per_cap:.1f} min")
+
+    st.markdown("**Who loses access?** (by population group, equity analysis)")
+    eq = equity_table(impact)
+    if not eq.empty:
+        st.dataframe(eq, use_container_width=True, hide_index=True)
+
+    dispro = (impact.get("equity") or {}).get("disproportionately_affected", [])
+    if dispro:
+        names = {"elderly": "elderly", "mobility": "mobility-limited",
+                 "lowcar": "low-car households"}
+        st.warning(f"Disruption disproportionately affects: "
+                   f"{', '.join(names.get(g, g) for g in dispro)}. Their "
+                   f"average access deteriorates more than the general "
+                   f"population, while a larger share loses coverage.")
+    else:
+        st.caption("No group is disproportionately affected - the disruption "
+                   "spreads evenly across population groups.")
 
     st.markdown("**Most affected zones** (by population × travel-time change, "
                 "normalised 0-100)")
@@ -525,10 +790,31 @@ def _hospital_catchment(impact, net) -> None:
 
 
 def _interventions_page(net, snap, impact, threshold, closed,
-                        candidates: list | None = None) -> None:
+                        candidates: list | None = None, scenario="closure") -> None:
     st.subheader("Intervention analysis")
     if impact is None:
-        st.info("Close a road in the Simulate tab to see interventions here.")
+        st.info("Run a scenario in the Simulate tab to see interventions here.")
+        return
+    if scenario != "closure":
+        st.markdown(
+            "This tab compares interventions for a **road closure** scenario. "
+            "The current scenario is an intervention itself:")
+        if scenario == "facility":
+            st.success(
+                f"**Add emergency facility** (near "
+                f"{st.session_state.scenario_road}) prevents "
+                f"**{impact.get('debt_prevented_pop_min', 0.0):,.0f} "
+                f"pop-min of accessibility debt** and brings "
+                f"**{int(impact.get('new_covered_pop', 0)):,} residents** "
+                f"within {threshold} min.")
+        else:
+            st.success(
+                f"**Emergency corridor** along "
+                f"{st.session_state.scenario_road} improved access for "
+                f"residents whose avg access changed "
+                f"{impact['avg_access_after'] - impact['avg_access_before']:+.1f} "
+                f"min. Compare it against closing a different road to see "
+                f"trade-offs.")
         return
     if candidates is None:
         candidates = run_interventions(tuple(sorted(closed)), float(threshold))
@@ -537,12 +823,14 @@ def _interventions_page(net, snap, impact, threshold, closed,
         return
 
     st.markdown(
-        "**Tested interventions** - reopen every segment, reopen each single "
-        "segment, or run an emergency corridor past the worst segment.")
+        "**Tested interventions** - each option reports how much accessibility "
+        "it restores and how much debt it removes.")
     rows = [
         {"Intervention": c["name"],
          "Population restored": c["population_restored"],
          "Population recovered": c["population_recovered"],
+         "Debt after (pop-min)": f"{c['debt_after_pop_min']:,.0f}",
+         "Debt reduction %": round(c["debt_reduction_pct"], 1),
          "Avg time saved (min)": round(c["avg_time_saved_min"], 2),
          "Accessibility recovery %": round(c["accessibility_recovery_pct"], 1),
          "Score (0-100)": c["score"],
@@ -567,7 +855,11 @@ def _interventions_page(net, snap, impact, threshold, closed,
         col1, col2, col3 = st.columns(3)
         col1.metric("Affected after", f"{outcome['pop_affected']:,}")
         col2.metric("Lost coverage after", f"{outcome['pop_lost_coverage']:,}")
-        col3.metric("Avg access after", f"{outcome['avg_access_after']:.1f} min")
+        col3.metric("Debt after", f"{outcome['debt_pop_minutes']:,.0f} pop-min")
+        choosing = next(c for c in candidates if c["name"] == chosen_name)
+        col4m = st.columns(1)[0]
+        col4m.metric("Debt reduction",
+                     f"{choosing['debt_reduction_pct']:.1f}%")
         m = build_map(net, snap, outcome, boosts=boost_pairs,
                       draw_controls=False)
         st_folium(m, height=480, use_container_width=True,
