@@ -20,7 +20,12 @@ from shapely import wkt
 from shapely.geometry import LineString
 from streamlit_folium import st_folium
 
-from src.ai import explain_interventions, summarize_closure
+from src.ai import (
+    ask_copilot,
+    explain_interventions,
+    generate_incident_action_plan,
+    summarize_closure,
+)
 from src.config import (
     CENTRE_LAT,
     CENTRE_LON,
@@ -29,15 +34,19 @@ from src.config import (
     POP_RASTER_PATH,
 )
 from src.engine import (
+    DISASTER_PRESETS,
     Network,
     add_facility_to_closure,
     closure_impact,
     corridor_road,
     coverage,
+    get_preset_edges,
+    hospital_surge_analysis,
     intervention_outcome,
     interventions,
     named_roads,
     road_edges,
+    travel_time_bands,
 )
 from src.nl import parse_scenario
 
@@ -194,10 +203,50 @@ def _edge_line(u: int, v: int) -> LineString | None:
 
 def build_map(net: Network, snap: dict, impact: dict | None, *,
               boosts: list | None = None, improved_nodes: list | None = None,
+              isochrones: bool = False, time_dict: dict | None = None,
               draw_controls: bool = True) -> folium.Map:
     m = folium.Map(location=(float(CENTRE_LAT), float(CENTRE_LON)),
                    zoom_start=12, tiles="CartoDB positron", control_scale=True)
     Fullscreen().add_to(m)
+
+    layers = []
+
+    # Isochrone Travel-Time Catchment Rings
+    if isochrones and time_dict is not None:
+        iso_layer = folium.FeatureGroup(name="Isochrone Catchment Bands")
+        # Sub-sample nodes for fast client rendering
+        nodes_list = list(net.graph.nodes)
+        sample_step = max(1, len(nodes_list) // 2500)
+        for node in nodes_list[::sample_step]:
+            t = time_dict.get(node, INF)
+            try:
+                x, y = _node_xy(net, node)
+            except KeyError:
+                continue
+
+            if t < 5.0:
+                color = "#2ecc71"
+                band = "<5 min (Rapid)"
+            elif t < 10.0:
+                color = "#3498db"
+                band = "5-10 min (Standard)"
+            elif t < 15.0:
+                color = "#f39c12"
+                band = "10-15 min (Threshold)"
+            elif t < 20.0:
+                color = "#e67e22"
+                band = "15-20 min (Delayed)"
+            else:
+                color = "#e74c3c"
+                band = ">20 min (Critical Gap)"
+
+            pop_val = net.population.get(node, 0)
+            folium.CircleMarker(
+                (y, x), radius=3, color=color, weight=0,
+                fill=True, fill_color=color, fill_opacity=0.6,
+                tooltip=f"Travel: {t:.1f} min ({band}) · Pop: {pop_val:,}"
+            ).add_to(iso_layer)
+        layers.append(iso_layer)
 
     hosp_layer = folium.FeatureGroup(name="Hospitals").add_to(m)
     for h in snap["hospitals"]:
@@ -214,7 +263,7 @@ def build_map(net: Network, snap: dict, impact: dict | None, *,
                             fill=True, fill_color="blue", fill_opacity=0.85,
                             popup=pop).add_to(hosp_layer)
 
-    layers = [hosp_layer]
+    layers.append(hosp_layer)
 
     crit = read_criticality()
     crit = crit[crit["score"].notna()]
@@ -234,7 +283,7 @@ def build_map(net: Network, snap: dict, impact: dict | None, *,
                 tooltip=(f"risk {s:.0f} · affected {int(row['pop_affected']):,}"
                          f" · lost {int(row['pop_lost']):,}"),
             ).add_to(risk_layer)
-        layers.insert(1, risk_layer)
+        layers.append(risk_layer)
 
     if boosts:
         boost_layer = folium.FeatureGroup(name="Emergency corridors")
@@ -412,6 +461,9 @@ def main() -> None:
         st.session_state.scenario_road = None
     if "facility_node" not in st.session_state:
         st.session_state.facility_node = None
+    if "copilot_chat" not in st.session_state:
+        st.session_state.copilot_chat = []
+
     closed = st.session_state.closed_edges
     closed_road = st.session_state.closed_road
     scenario = st.session_state.scenario
@@ -499,8 +551,8 @@ def main() -> None:
                                ", ".join(intent.get("roads", [])[:5]))
 
     # --- Tabs -------------------------------------------------------------
-    tab_overview, tab_simulate, tab_impact, tab_interventions = st.tabs(
-        ["Overview", "Simulate", "Impact", "Interventions"])
+    tab_overview, tab_simulate, tab_impact, tab_interventions, tab_copilot = st.tabs(
+        ["Overview", "Simulate", "Impact", "Interventions", "🤖 AI Copilot & Policy"])
 
     with tab_overview:
         _overview_page(net, snap, threshold)
@@ -515,6 +567,9 @@ def main() -> None:
     with tab_interventions:
         _interventions_page(net, snap, impact, threshold, closed, candidates,
                             scenario)
+
+    with tab_copilot:
+        _copilot_page(net, snap, impact, threshold, closed, candidates, scenario)
 
     if impact is not None:
         _sidebar_briefing(impact, candidates, net, closed_road)
@@ -558,7 +613,20 @@ def _overview_page(net, snap, threshold) -> None:
         "**Baseline accessibility** - the model city with no disruptions. "
         "Every junction is assigned to its nearest hospital; covered if the "
         "drive time is within the threshold.")
-    m = build_map(net, snap, None, draw_controls=False)
+
+    # Travel-time Isochrone Catchment Bands summary
+    bands = travel_time_bands(net, snap.get("node_time", {}))
+    st.markdown("##### ⏱️ Baseline Travel-Time Catchment Distribution")
+    b_cols = st.columns(5)
+    for i, (b_name, b_data) in enumerate(bands.items()):
+        b_cols[i].metric(
+            b_name,
+            f"{b_data['pop']:,}",
+            f"{b_data['pop_pct']:.1f}% pop",
+        )
+
+    m = build_map(net, snap, None, draw_controls=False, isochrones=True,
+                  time_dict=snap.get("node_time", {}))
     st_folium(m, height=560, use_container_width=True, key="overview_map")
 
 
@@ -577,13 +645,12 @@ def _simulate_page(net, edge_lines, snap, threshold, closed, closed_road,
             ["Road closure", "Add emergency facility", "Emergency corridor"],
             index=0 if scenario == "closure" else
             (1 if scenario == "facility" else 2))
-        mode = st.radio("Scenario input", ["Pick a named road", "Draw on the map"],
-                        index=0)
-        names = road_names()
-        chosen = st.selectbox("Select road", [""] + names,
-                              format_func=lambda x: x or "Choose a road...")
-        run = st.button("RUN SIMULATION", type="primary",
-                        disabled=not chosen)
+        mode = st.radio(
+            "Scenario input",
+            ["Pick a named road", "Disaster preset (Multi-hazard)", "Draw on the map"],
+            index=0)
+
+        show_iso = st.checkbox("Show travel-time catchment bands (isochrones)", value=False)
 
         def _run_scenario(choice: str, road: str) -> None:
             if choice == "Road closure":
@@ -606,12 +673,40 @@ def _simulate_page(net, edge_lines, snap, threshold, closed, closed_road,
             st.session_state.active_intervention = None
             st.rerun()
 
-        if run and chosen:
-            _run_scenario(scenario_choice, chosen)
+        if mode == "Pick a named road":
+            names = road_names()
+            chosen = st.selectbox("Select road", [""] + names,
+                                  format_func=lambda x: x or "Choose a road...")
+            run = st.button("RUN SIMULATION", type="primary", disabled=not chosen)
+            if run and chosen:
+                _run_scenario(scenario_choice, chosen)
 
-        if mode == "Draw on the map":
+        elif mode == "Disaster preset (Multi-hazard)":
+            st.markdown("**Real-world Emergency Presets**")
+            preset_options = list(DISASTER_PRESETS.keys())
+            chosen_preset_id = st.selectbox(
+                "Select preset incident",
+                preset_options,
+                format_func=lambda k: f"{DISASTER_PRESETS[k]['icon']} {DISASTER_PRESETS[k]['title']}"
+            )
+            preset_info = DISASTER_PRESETS[chosen_preset_id]
+            st.caption(f"**Scenario:** {preset_info['description']}")
+            st.caption(f"**Impacted Corridors:** {', '.join(preset_info['roads'])}")
+            if st.button("RUN PRESET SIMULATION", type="primary"):
+                p_edges = get_preset_edges(net, chosen_preset_id)
+                if p_edges:
+                    st.session_state.closed_edges = set(p_edges)
+                    st.session_state.closed_road = preset_info["title"]
+                    st.session_state.scenario = "closure"
+                    st.session_state.active_intervention = None
+                    st.rerun()
+                else:
+                    st.error("No graph segments matched for this preset.")
+
+        elif mode == "Draw on the map":
             st.caption("Draw a red line over roads on the map to close them. "
                        "Segments within ~130 m of the line are closed.")
+
         if closed:
             st.button("Clear all closures", on_click=_clear_state)
 
@@ -632,12 +727,17 @@ def _simulate_page(net, edge_lines, snap, threshold, closed, closed_road,
             boosts = None
             if scenario == "corridor" and st.session_state.scenario_road:
                 boosts = road_edges(net.graph, st.session_state.scenario_road)
-            impact_map = build_map(net, snap, impact, boosts=boosts,
-                                   improved_nodes=improved)
+            impact_map = build_map(
+                net, snap, impact, boosts=boosts,
+                improved_nodes=improved, isochrones=show_iso,
+                time_dict=impact.get("time_to_hospital")
+            )
         else:
-            st.info("No scenario yet. Pick a road and run the simulation, or "
-                    "draw a line over the map, to start.")
-            impact_map = build_map(net, snap, None)
+            st.info("No scenario yet. Pick a road or disaster preset to start.")
+            impact_map = build_map(
+                net, snap, None, isochrones=show_iso,
+                time_dict=snap.get("node_time")
+            )
 
     output = st_folium(impact_map, height=640, use_container_width=True,
                        key="access_map", returned_objects=["last_active_drawing"])
@@ -679,8 +779,6 @@ def _before_after(net, snap, impact, threshold, closed_road, scenario) -> None:
                 f"{impact['avg_access_before']:.1f} min")
     delta = impact["avg_access_after"] - impact["avg_access_before"]
     label = "After: avg access time"
-    if improving:
-        label = "After: avg access time"
     col2.metric(label, f"{impact['avg_access_after']:.1f} min",
                 delta=f"{delta:+.1f} min")
     debt = impact.get("debt_pop_minutes", 0.0)
@@ -744,6 +842,25 @@ def _impact_page(net, snap, impact, threshold, scenario) -> None:
         col2a.metric("Debt per affected person",
                      f"{per_cap:.1f} min")
 
+    st.markdown("---")
+    st.markdown("#### 🏥 Hospital Surge & Capacity Strain Analysis")
+    surge_data = hospital_surge_analysis(net, snap, impact)
+    if surge_data:
+        surge_df = pd.DataFrame([
+            {
+                "Status": s["badge"],
+                "Hospital": s["name"],
+                "Beds": s["capacity_beds"],
+                "Baseline Served": f"{s['baseline_pop']:,}",
+                "Disruption Served": f"{s['current_pop']:,}",
+                "Patient Shift (Δ)": f"{s['delta_pop']:+,}",
+                "Surge Strain": f"{s['delta_pct']:+.1f}%",
+            }
+            for s in surge_data
+        ])
+        st.dataframe(surge_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
     st.markdown("**Who loses access?** (by population group, equity analysis)")
     eq = equity_table(impact)
     if not eq.empty:
@@ -767,26 +884,9 @@ def _impact_page(net, snap, impact, threshold, scenario) -> None:
     if not zones.empty:
         st.dataframe(zones, use_container_width=True, hide_index=True)
 
-    m = build_map(net, snap, impact, draw_controls=False)
+    m = build_map(net, snap, impact, draw_controls=False, isochrones=True,
+                  time_dict=impact.get("time_to_hospital"))
     st_folium(m, height=520, use_container_width=True, key="impact_map")
-    _hospital_catchment(impact, net)
-
-
-def _hospital_catchment(impact, net) -> None:
-    if not impact.get("hospitals_lost"):
-        st.caption("No hospital lost catchment population - access was delayed "
-                   "but not lost anywhere.")
-        return
-    osm_to_name = {str(h["osm_id"]): h["name"]
-                   for h in net.hospitals.to_dict("records")}
-    rows = [
-        {"Hospital": osm_to_name.get(oid, oid),
-         "Population lost": int(p)}
-        for oid, p in sorted(impact["hospitals_lost"].items(),
-                             key=lambda kv: -kv[1])
-    ]
-    st.markdown("**Hospitals absorbing lost access**")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def _interventions_page(net, snap, impact, threshold, closed,
@@ -871,6 +971,77 @@ def _interventions_page(net, snap, impact, threshold, closed,
     ai = explain_interventions(impact, candidates, net)
     st.sidebar.info(f"Intervention AI: {ai['provider']}")
     st.markdown(ai["text"])
+
+
+def _copilot_page(net: Network, snap: dict, impact: dict | None, threshold: float,
+                  closed: set, candidates: list, scenario: str) -> None:
+    st.subheader("🤖 AI Disaster Logistics Copilot & Policy Exporter")
+    st.markdown(
+        "Interact directly with Gemini or the offline logistics engine to interrogate "
+        "complex routing scenarios, patient displacement, and generate official policy briefs."
+    )
+
+    col_l, col_r = st.columns([3, 2])
+
+    with col_l:
+        st.markdown("##### 💬 Logistics Assistant Chat")
+
+        # Quick query buttons
+        q_cols = st.columns(4)
+        quick_query = None
+        if q_cols[0].button("💰 Total Debt?"):
+            quick_query = "What is the total accessibility debt of this disruption?"
+        if q_cols[1].button("🏥 Hospital Strain?"):
+            quick_query = "Which hospitals experience the highest patient shift or severed access?"
+        if q_cols[2].button("⚖️ Equity Alert?"):
+            quick_query = "Which vulnerable demographic groups are hit hardest by this scenario?"
+        if q_cols[3].button("⚡ Best Action?"):
+            quick_query = "Which intervention should emergency services prioritize and why?"
+
+        # Display chat history
+        for msg in st.session_state.copilot_chat:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # Input box
+        user_input = st.chat_input("Ask a question about emergency hospital access...")
+        active_query = quick_query or user_input
+
+        if active_query:
+            st.session_state.copilot_chat.append({"role": "user", "content": active_query})
+            with st.chat_message("user"):
+                st.markdown(active_query)
+
+            with st.chat_message("assistant"):
+                with st.spinner("Analyzing scenario logistics..."):
+                    res = ask_copilot(
+                        active_query,
+                        st.session_state.copilot_chat,
+                        impact,
+                        net,
+                        candidates,
+                    )
+                    st.caption(f"Provider: {res['provider']}")
+                    st.markdown(res["text"])
+                    st.session_state.copilot_chat.append({"role": "assistant", "content": res["text"]})
+
+    with col_r:
+        st.markdown("##### 📋 Official Policy & Incident Action Plan (IAP)")
+        st.caption("Generate a structured emergency response brief for SDRF, NDRF, and Traffic Police.")
+
+        if impact is not None:
+            iap_text = generate_incident_action_plan(impact, net, candidates)
+            st.download_button(
+                label="📥 Download Incident Action Plan (IAP.md)",
+                data=iap_text,
+                file_name="AccessGrid_Incident_Action_Plan.md",
+                mime="text/markdown",
+                type="primary",
+            )
+            with st.expander("Preview Incident Action Plan", expanded=True):
+                st.markdown(iap_text)
+        else:
+            st.info("Run a disruption scenario in the Simulate tab to generate an Incident Action Plan.")
 
 
 def _clear_state() -> None:

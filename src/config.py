@@ -24,7 +24,7 @@ if POP_RASTER:
 else:
     POP_RASTER_PATH = None
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 DEFAULT_THRESHOLD_MIN = float(os.getenv("DEFAULT_THRESHOLD_MIN", "15"))

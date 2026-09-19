@@ -824,3 +824,210 @@ def corridor_road(
         "corridor_factor": float(factor),
         **fields,
     }
+
+
+# --------------------------------------------------------------------------
+# Multi-Hazard Disaster Presets & Isochrone / Surge Extensions
+# --------------------------------------------------------------------------
+DISASTER_PRESETS = {
+    "monsoon_flood": {
+        "title": "Monsoon Flash Flood (Underpass Inundation)",
+        "description": "Heavy monsoon waterlogging submerging low-lying underpasses along Madhya Marg and Dakshin Marg.",
+        "roads": ["Madhya Marg", "Dakshin Marg"],
+        "icon": "🌊",
+    },
+    "vip_lockdown": {
+        "title": "VIP Security Arterial Lockdown",
+        "description": "Coordinated security lockdown sealing primary civic corridors across Jan Marg and Himalaya Marg.",
+        "roads": ["Jan Marg", "Himalaya Marg"],
+        "icon": "🚨",
+    },
+    "industrial_hazard": {
+        "title": "Industrial Corridor Hazmat Spill",
+        "description": "Hazardous materials disruption closing key freight arterials on Vikas Marg and Udyog Path.",
+        "roads": ["Vikas Marg", "Udyog Path"],
+        "icon": "⚠️",
+    },
+}
+
+
+def get_preset_edges(net: Network, preset_id: str) -> list[tuple[int, int]]:
+    """Return all graph edges for a given multi-hazard preset."""
+    preset = DISASTER_PRESETS.get(preset_id)
+    if not preset:
+        return []
+    edges = set()
+    for road in preset["roads"]:
+        # Find matching edges (supports exact or partial road name matching)
+        for u, v in road_edges(net.graph, road):
+            edges.add((min(u, v), max(u, v)))
+    # If no named edges found directly, match fuzzy road names from graph
+    if not edges:
+        all_named = named_roads(net.graph)
+        for target in preset["roads"]:
+            for r in all_named:
+                if target.lower() in r["name"].lower():
+                    for u, v in road_edges(net.graph, r["name"]):
+                        edges.add((min(u, v), max(u, v)))
+    return sorted(edges)
+
+
+def travel_time_bands(net: Network, time_dict: dict[int, float]) -> dict[str, dict]:
+    """Bucket network nodes and population into travel-time accessibility bands.
+
+    Bands:
+      * '<5 min'    : rapid response
+      * '5-10 min'  : optimal emergency access
+      * '10-15 min' : threshold limit
+      * '15-20 min' : delayed response
+      * '>20 min'   : critical delay / unreachable
+    """
+    bands = {
+        "<5 min": {"pop": 0, "nodes": 0, "color": "#2ecc71"},
+        "5-10 min": {"pop": 0, "nodes": 0, "color": "#3498db"},
+        "10-15 min": {"pop": 0, "nodes": 0, "color": "#f39c12"},
+        "15-20 min": {"pop": 0, "nodes": 0, "color": "#e67e22"},
+        ">20 min / Isolated": {"pop": 0, "nodes": 0, "color": "#e74c3c"},
+    }
+
+    total_pop = sum(net.population.values()) or 1
+    total_nodes = len(net.graph.nodes) or 1
+
+    for node in net.graph.nodes:
+        t = time_dict.get(node, INF)
+        pop = net.population.get(node, 0)
+
+        if t < 5.0:
+            key = "<5 min"
+        elif t < 10.0:
+            key = "5-10 min"
+        elif t < 15.0:
+            key = "10-15 min"
+        elif t < 20.0:
+            key = "15-20 min"
+        else:
+            key = ">20 min / Isolated"
+
+        bands[key]["pop"] += pop
+        bands[key]["nodes"] += 1
+
+    for k, v in bands.items():
+        v["pop_pct"] = (v["pop"] / total_pop) * 100.0
+        v["nodes_pct"] = (v["nodes"] / total_nodes) * 100.0
+
+    return bands
+
+
+def hospital_surge_analysis(
+    net: Network,
+    baseline: dict,
+    impact: dict | None,
+) -> list[dict]:
+    """Calculate hospital patient load shift and capacity strain under disruption."""
+    hospitals_df = net.hospitals
+    if hospitals_df.empty:
+        return []
+
+    # Map hospital node_id to metadata
+    hosp_map = {}
+    for h in hospitals_df.to_dict("records"):
+        node_id = int(h["node_id"])
+        hosp_map[node_id] = {
+            "name": h.get("name", f"Hospital @ node {node_id}"),
+            "osm_id": str(h.get("osm_id", node_id)),
+            "capacity": int(h.get("capacity", 100) or 100),
+            "type": str(h.get("type", "Hospital")),
+            "baseline_pop": 0,
+            "current_pop": 0,
+        }
+
+    # Baseline assignment
+    base_hosp = baseline.get("node_hospital", {})
+    base_time = baseline.get("node_time", {})
+    thresh = float(baseline.get("threshold", 15.0))
+    for node, pop in net.population.items():
+        h_node = base_hosp.get(node)
+        if h_node in hosp_map:
+            t = base_time.get(node, INF)
+            if t <= thresh:
+                hosp_map[h_node]["baseline_pop"] += pop
+
+    # Current scenario assignment
+    if impact is not None:
+        closed = impact.get("closed_edges", [])
+        work = _work_graph(net, closed, [])
+        sources = [int(n) for n in net.hospitals["node_id"]]
+        curr_time, curr_hosp = nearest_hospitals(work, sources)
+        curr_thresh = float(impact.get("threshold", thresh))
+        for node, pop in net.population.items():
+            h_node = curr_hosp.get(node)
+            if h_node in hosp_map:
+                t = curr_time.get(node, INF)
+                if t <= curr_thresh:
+                    hosp_map[h_node]["current_pop"] += pop
+    else:
+        for h_node in hosp_map:
+            hosp_map[h_node]["current_pop"] = hosp_map[h_node]["baseline_pop"]
+
+    surge_list = []
+    for h_node, d in hosp_map.items():
+        base_p = d["baseline_pop"]
+        curr_p = d["current_pop"]
+        diff = curr_p - base_p
+        diff_pct = (diff / base_p * 100.0) if base_p > 0 else 0.0
+
+        if diff > 1000 or diff_pct > 25.0:
+            status = "CRITICAL SURGE"
+            badge = "🚨 Critical Surge"
+        elif diff > 200 or diff_pct > 10.0:
+            status = "STRAINED"
+            badge = "⚠️ Strained"
+        elif diff < -500 or (base_p > 0 and curr_p < base_p * 0.75):
+            status = "CUT OFF"
+            badge = "⛔ Access Severed"
+        else:
+            status = "STABLE"
+            badge = "✅ Stable"
+
+        surge_list.append({
+            "node_id": h_node,
+            "name": d["name"],
+            "osm_id": d["osm_id"],
+            "capacity_beds": d["capacity"],
+            "baseline_pop": base_p,
+            "current_pop": curr_p,
+            "delta_pop": diff,
+            "delta_pct": diff_pct,
+            "status": status,
+            "badge": badge,
+        })
+
+    return sorted(surge_list, key=lambda x: -x["delta_pop"])
+
+
+def facility_node_for_road(net: Network, road_name: str) -> int | None:
+    """Where to place an emergency facility for a given road: the segment
+    endpoint closest to the road's midpoint (its most central junction)."""
+    segs = road_edges(net.graph, road_name)
+    if not segs:
+        return None
+    xs, ys = [], []
+    for u, v in segs:
+        try:
+            xu, yu = float(net.graph.nodes[u]["x"]), float(net.graph.nodes[u]["y"])
+            xv, yv = float(net.graph.nodes[v]["x"]), float(net.graph.nodes[v]["y"])
+        except (KeyError, TypeError):
+            continue
+        xs += [xu, xv]
+        ys += [yu, yv]
+    if not xs:
+        return None
+    cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+    best, best_d = None, INF
+    for n in {p for s in segs for p in s}:
+        if n in net.graph.nodes:
+            x, y = float(net.graph.nodes[n]["x"]), float(net.graph.nodes[n]["y"])
+            d = (x - cx) ** 2 + (y - cy) ** 2
+            if d < best_d:
+                best, best_d = n, d
+    return best

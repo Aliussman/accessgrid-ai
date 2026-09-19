@@ -1,121 +1,73 @@
-# AccessGrid
+# AccessGrid AI — Emergency Access Digital Twin
 
-Emergency-access digital twin for the Mohali / Chandigarh / Panchkula metro.
-A planner closes road segments on a map; AccessGrid recomputes which
-population still reaches a hospital within an emergency time budget and
-summarises the impact, including an optional Gemini-generated briefing.
+Emergency-access digital twin and decision-support platform for the **Mohali / Chandigarh / Panchkula (Tri-City)** metropolitan area.
 
-Built for a 24 h AI-for-Good hackathon (Urban Planning track).
+A planner or emergency responder simulates road closures, flood inundations, or security cordons; AccessGrid computes which population loses hospital access within the emergency time budget, measures **Accessibility Debt**, models **hospital capacity surge**, and ranks optimal recovery interventions with an interactive **Gemini AI Logistics Copilot** and one-click **Incident Action Plan (IAP)** export.
 
-## What it does
+Built for the **AI-for-Good / Urban Planning Hackathon**.
 
-- **Coverage** — every graph node is assigned to its nearest hospital
-  (multi-source Dijkstra on edge `travel_time`, minutes). A node is
-  *covered* if that time is within a threshold (default 15 min).
-- **Closure impact** — closed road segments re-route traffic; the engine
-  reports population that *loses* all in-threshold access, is *delayed but
-  served*, and which hospitals absorb the loss.
-- **Before/after** — the Simulate tab shows average access time and covered
-  population before vs after a disruption, plus the top "most affected zones"
-  ranked by population × travel-time change (normalised 0-100).
-- **Interventions** — the engine ranks ways to restore access: reopen all
-  closed segments, reopen each high-usage segment alone, or run an emergency
-  corridor (0.7× travel time) around the worst segment. Each candidate reports
-  population restored, recovered, average time saved, and accessibility
-  recovery %. Pick one to preview it on the map.
-- **Scenarios** — close roads two ways: pick a named street from a dropdown
-  (``RUN SIMULATION``) or draw a polyline over the map; segments near the line
-  are closed automatically.
-- **Natural-language input** — the sidebar parses planner sentences such as
-  *"What happens if Dakshin Marg is closed during an emergency?"* and
-  *"Which intervention helps the most?"* (deterministic, offline; fuzzy road
-  matching via rapidfuzz).
-- **Criticality** — precomputed per-edge risk (route usage + exact single-edge
-  closure for top-150 edges, threshold 10 min at precompute time) shown as
-  "Riskiest corridors".
-- **What-if engine** — beyond road closure you can also test **"add an
-  emergency facility"** (sites it on the most central junction of a chosen
-  road and shows newly within-threshold residents + debt prevented) and
-  **"emergency corridor"** (0.7× travel time along a chosen road, an
-  emergency-only priority route).
-- **Accessibility Debt (AD)** — every scenario reports its
-  **pop-min accessibility debt** `AD = Σ P_i × (T_i,after − T_i,before)` and
-  per-capita debt, so interventions can be compared as "how much plain
-  accessibility did this restore".
-- **Equity analysis** — population-group-aware: elderly / mobility-limited /
-  low-car shares are read from `pop_by_node.csv`, and every impact breaks out
-  the travel-time change and lost coverage per group, flagging when a
-  disruption *disproportionately* affects a vulnerable group.
-- **Interventions** — the engine ranks ways to restore access (reopen all,
-  reopen each segment, or an emergency corridor), each reporting debt
-  reduction to go with restored/recovered population.
-- **AI briefing** — concise analyst-style closure summary and intervention
-  recommendation from Google Gemini, with a deterministic template fallback
-  when offline.
-- Synthetic (formula-based) population and bed counts are clearly labelled
-  and flagged in the UI when no real raster is configured, as are the
-  vulnerability shares (synthetic, not census).
+---
 
-## Quick start
+## 🌟 Key Features
 
+- **Multi-Source Dijkstra Routing** — Every graph node is assigned to its nearest hospital (minimum travel time over the drive network). A node is covered if reachable within the threshold (default 15 min).
+- **Modern React + Leaflet Dark Mode UI** — Intuitive glassmorphic cockpit with floating telemetry HUD, glowing isochrone catchment rings, pulsing red closures, and hospital capacity markers.
+- **Accessibility Debt (AD)** — Quantifies the societal cost of disruptions:
+  $$\text{AD} = \sum P_i \times (T_{i, \text{after}} - T_{i, \text{before}})$$
+  reported in population-minutes and per-capita debt to objectively rank interventions.
+- **🏥 Hospital Surge & Capacity Strain** — Tracks patient displacement ($\Delta$) and overload warnings against hospital bed capacities (`🚨 Critical Surge`, `⚠️ Strained`, `⛔ Access Severed`, `✅ Stable`).
+- **Demographic Equity & Vulnerability Tracking** — Evaluates delays across **Elderly (65+)**, **Mobility-Limited**, and **Low-Car** households, automatically flagging disproportionate impacts.
+- **🌊 1-Click Multi-Hazard Presets** — *Monsoon Flash Flood (Underpass Inundation)*, *VIP Security Arterial Lockdown*, and *Industrial Hazmat Spill*.
+- **🤖 AI Disaster Logistics Copilot** — Interactive multi-turn chat powered by Google GenAI (`gemini-3.6-flash`), with 100% offline deterministic fallback.
+- **📋 One-Click Incident Action Plan (IAP) Export** — Generates official emergency response briefs ready for download as Markdown for SDRF, NDRF, and Traffic Police.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Backend Setup
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env          # optional: set GEMINI_API_KEY for AI briefings
-
-python -m src.graph_build                     # build/refresh cached data
-python -m scripts.precompute_criticality      # optional risk-layer scores
-streamlit run app.py
+cp .env.example .env          # Set GEMINI_API_KEY=your_key in .env
+python server.py              # Starts FastAPI backend on http://localhost:8000
 ```
 
-`app.py` works fully offline (cached local extract + template briefings).
-Run tests with `python -m pytest tests/`.
-
-## Data files (`data/`)
-
-| File | Contents |
-| --- | --- |
-| `city.graphml` | Drive network (largest component), `speed_kph`, `travel_time` (min) per edge |
-| `hospitals.geojson` | OSM `amenity=hospital`, snapped to nearest node; `type`, synthetic `capacity` (beds) |
-| `pop_by_node.csv` | `node_id, population` per graph node |
-| `criticality.csv` | Edge risk scores (usage / affected / lost) |
-| `mohali_extract.osm` | Local OSM extract that builds everything offline |
-
-### Population
-
-No population raster was configured, so `pop_by_node.csv` is **synthetic**
-(Gaussian around the centre + road-degree bonus, rng seed 42). Set
-`POP_RASTER=` in `.env` to a raster path to use real cell data instead.
-
-### Network source
-
-Network + hospitals come from a Geofabrik Northern Zone PBF converted by
-`src/osmpbf_extract.py` (pure-Python PBF → OSM XML for osmnx), used because
-Overpass mirrors were firewalled during development. With internet access
-`graph_build` can use Overpass directly; it prefers the local extract when
-present.
-
-## Architecture
-
-```
-app.py                             Streamlit + Folium UI (4 tabs: Overview,
-                                   Simulate, Impact, Interventions)
-scripts/precompute_criticality.py  Edge-risk scoring -> criticality.csv
-src/graph_build.py                 Data build/cache (graph, hospitals, pop)
-src/engine.py                      Coverage, closure impact, interventions,
-                                   named-road + road-edge helpers
-src/nl.py                          Deterministic natural-language parser
-src/ai.py                          Gemini briefing (template fallback)
-src/osmpbf_extract.py              PBF bbox extractor for offline data
-src/config.py                      .env-driven configuration
-tests/                             pytest suite (engine + AI + NL)
+### 2. Frontend Setup (React SPA)
+In a separate terminal:
+```bash
+cd frontend
+npm install
+npm run dev                   # Starts React frontend on http://localhost:5173
 ```
 
-## Config (`.env`)
+### 3. Run Automated Tests
+```bash
+pytest tests/                 # Runs full suite (45 tests)
+```
 
-- `CENTRE_LAT`, `CENTRE_LON`, `RADIUS_KM` — study area (default tri-city).
-- `DEFAULT_THRESHOLD_MIN` — emergency coverage threshold (default 15).
-- `POP_RASTER` — optional population raster; synthetic fallback if unset.
-- `GEMINI_API_KEY`, `GEMINI_MODEL` — AI briefing.
-- `OVERPASS_ENDPOINT` — fallback Overpass endpoint for graph downloads.
+---
+
+## 🏗️ Architecture
+
+```
+frontend/                          React 18 SPA (Vite, Leaflet, Lucide Icons, Glassmorphic CSS)
+server.py                          FastAPI REST Backend (Endpoints for overview, simulate, presets, copilot, IAP)
+src/engine.py                      Routing engine (Multi-source Dijkstra, isochrones, surge, interventions)
+src/ai.py                          Gemini Copilot & Incident Action Plan generator (with template fallbacks)
+src/nl.py                          Deterministic natural-language fuzzy intent parser (rapidfuzz)
+src/graph_build.py                 Build/cache road network, hospitals, and population from OSM
+data/                              Cached datasets (city.graphml, hospitals.geojson, pop_by_node.csv, criticality.csv)
+tests/                             Comprehensive pytest suite (test_api.py, test_engine.py, test_ai.py, test_nl.py)
+```
+
+---
+
+## ⚙️ Configuration (`.env`)
+
+- `CENTRE_LAT`, `CENTRE_LON`, `RADIUS_KM` — Study area (default: 30.71, 76.75, 8.0 km).
+- `DEFAULT_THRESHOLD_MIN` — Emergency coverage threshold (default: 15 min).
+- `GEMINI_API_KEY` — Google GenAI API key for live AI briefings.
+- `GEMINI_MODEL` — Active Gemini model (default: `gemini-3.6-flash`).
+- `POP_RASTER` — Optional GeoTIFF raster path; synthetic fallback used if unset.

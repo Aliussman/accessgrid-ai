@@ -247,3 +247,205 @@ def _template_summary(impact: dict, net, interventions: Optional[list] = None) -
             "monitor the affected residential nodes for rerouting."
         )
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# Multi-Turn AI Copilot & Incident Action Plan (IAP) Generator
+# --------------------------------------------------------------------------
+def ask_copilot(
+    query: str,
+    chat_history: list[dict],
+    impact: dict | None,
+    net,
+    candidates: Optional[list] = None,
+) -> dict:
+    """Conversational AI Assistant for planners to interrogate scenario details.
+
+    Returns dict with {"provider": "gemini"|"template", "text": str}.
+    """
+    total_pop = _sum_pop(net)
+    hosp_count = len(net.hospitals)
+
+    # Build active context
+    if impact is not None:
+        closed_km = _closed_length_km(net.graph, impact.get("closed_edges", []))
+        affected = impact.get("pop_affected", 0)
+        lost = impact.get("pop_lost_coverage", 0)
+        debt = impact.get("debt_pop_minutes", 0.0)
+        eq = impact.get("equity", {})
+        dispro = eq.get("disproportionately_affected", [])
+
+        inter_summary = []
+        if candidates:
+            for i, c in enumerate(candidates[:3], 1):
+                inter_summary.append(
+                    f"- {c['name']}: Restores {c['population_restored']:,} people, "
+                    f"cuts debt {c.get('debt_reduction_pct', 0.0):.1f}%"
+                )
+        inter_text = "\n".join(inter_summary) or "None tested."
+
+        system_context = (
+            f"You are the AccessGrid Emergency Logistics Copilot for Chandigarh / Mohali.\n"
+            f"ACTIVE SCENARIO:\n"
+            f"- Total city population: {total_pop:,}, Hospitals: {hosp_count}\n"
+            f"- Closed road segments: {len(impact.get('closed_edges', []))} ({closed_km:.1f} km)\n"
+            f"- Population affected: {affected:,} | Population lost coverage: {lost:,}\n"
+            f"- Accessibility Debt: {debt:,.0f} pop-minutes\n"
+            f"- Disproportionately affected vulnerable groups: {', '.join(dispro) if dispro else 'None'}\n"
+            f"- Top Interventions:\n{inter_text}\n\n"
+            f"Answer the user's questions clearly, concisely, and practically for emergency planners. "
+            f"Quote numbers accurately from the facts above. Be direct and helpful."
+        )
+    else:
+        system_context = (
+            f"You are the AccessGrid Emergency Logistics Copilot for Chandigarh / Mohali.\n"
+            f"STATUS: Normal Baseline (No active road disruptions).\n"
+            f"- Total city population: {total_pop:,}\n"
+            f"- Operating hospitals: {hosp_count}\n"
+            f"Advise the planner on potential risk points, coverage thresholds, or suggest testing road closures."
+        )
+
+    # Format conversation history
+    history_lines = []
+    for msg in chat_history[-6:]:
+        role = "User" if msg.get("role") == "user" else "Copilot"
+        history_lines.append(f"{role}: {msg.get('content', '')}")
+    history_text = "\n".join(history_lines)
+
+    prompt = f"{system_context}\n\nCONVERSATION HISTORY:\n{history_text}\n\nUser Question: {query}\nCopilot Answer:"
+
+    if GEMINI_API_KEY:
+        try:
+            from google import genai
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            resp = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+            )
+            text = (resp.text or "").strip()
+            if text:
+                return {"provider": "gemini", "text": text}
+        except Exception:
+            pass
+
+    # Deterministic offline fallback logic
+    lower_q = query.lower()
+    if "debt" in lower_q or "accessibility debt" in lower_q:
+        if impact:
+            ans = f"The active scenario generates **{impact.get('debt_pop_minutes', 0):,.0f} population-minutes** of accessibility debt ({impact.get('per_capita_debt_min', 0):.1f} min per affected resident)."
+        else:
+            ans = "Accessibility debt is currently **0 pop-min** as no disruptions are active on the network."
+    elif "hospital" in lower_q or "surge" in lower_q or "capacity" in lower_q:
+        if impact and impact.get("hospitals_lost"):
+            lost_h = list(impact["hospitals_lost"].items())[:3]
+            ans = f"Hospitals with severed or reduced direct catchment: " + ", ".join(f"{h}: {p:,} pop lost" for h, p in lost_h) + "."
+        else:
+            ans = f"All {hosp_count} hospitals are currently operating within baseline network routing."
+    elif "best" in lower_q or "intervention" in lower_q or "recommend" in lower_q:
+        if candidates:
+            best = candidates[0]
+            ans = f"Top recommended action: **{best['name']}**. It restores access for {best['population_restored']:,} residents and cuts accessibility debt by {best.get('debt_reduction_pct', 0.0):.1f}%."
+        else:
+            ans = "Close a road or select a disaster preset in the Simulate tab to analyze prioritized interventions."
+    elif "equity" in lower_q or "elderly" in lower_q or "vulnerable" in lower_q:
+        if impact:
+            dispro = impact.get("equity", {}).get("disproportionately_affected", [])
+            if dispro:
+                ans = f"⚠️ Vulnerability Alert: Disproportionate delays detected for: **{', '.join(dispro)}** households."
+            else:
+                ans = "Delays are distributed across general demographics without high disproportionate concentration."
+        else:
+            ans = "Baseline equity shares are synthetic and loaded for elderly, mobility-limited, and low-car demographics."
+    else:
+        if impact:
+            ans = (
+                f"Active disruption affects **{impact.get('pop_affected', 0):,}** residents "
+                f"({impact.get('pop_lost_coverage', 0):,} losing threshold access). "
+                f"Primary recommendation is to establish a priority corridor or reopen critical bottlenecks."
+            )
+        else:
+            ans = (
+                f"AccessGrid is monitoring {total_pop:,} residents across {hosp_count} emergency hospitals. "
+                "Select a disaster scenario preset or draw a road closure to simulate impacts."
+            )
+
+    return {"provider": "template", "text": ans}
+
+
+def generate_incident_action_plan(
+    impact: dict,
+    net,
+    candidates: Optional[list] = None,
+) -> str:
+    """Generate a formal Incident Action Plan (IAP) report for emergency responders."""
+    total_pop = _sum_pop(net)
+    closed_edges = impact.get("closed_edges", [])
+    closed_km = _closed_length_km(net.graph, closed_edges)
+    affected = impact.get("pop_affected", 0)
+    lost = impact.get("pop_lost_coverage", 0)
+    worsened = impact.get("pop_worsened", 0)
+    debt = impact.get("debt_pop_minutes", 0.0)
+    threshold = impact.get("threshold", 15.0)
+
+    eq = impact.get("equity", {})
+    dispro = eq.get("disproportionately_affected", [])
+
+    top_interventions = ""
+    if candidates:
+        rows = []
+        for i, c in enumerate(candidates[:3], 1):
+            rows.append(
+                f"| {i} | **{c['name']}** | {c['population_restored']:,} | {c['avg_time_saved_min']:.2f} min | {c.get('debt_reduction_pct', 0.0):.1f}% |"
+            )
+        top_interventions = "\n".join(rows)
+    else:
+        top_interventions = "| 1 | Reopen all closed road segments | Full recovery | N/A | 100% |"
+
+    report = f"""# 📋 INCIDENT ACTION PLAN (IAP) — EMERGENCY ACCESS
+**Metro Jurisdiction:** Chandigarh / Mohali / Panchkula Urban Area
+**Incident Operational Period:** Immediate Tactical Window
+**Assessment Platform:** AccessGrid Digital Twin
+
+---
+
+## 1. Executive Situational Overview
+- **Network Status:** Active Road Closures Detected ({len(closed_edges)} segments, ~{closed_km:.1f} km total).
+- **Emergency Access Threshold:** {threshold:.0f} Minutes (Golden Hour Response).
+- **Total Population in Study Area:** {total_pop:,}
+- **Directly Impacted Population:** **{affected:,}** ({(affected / total_pop * 100):.1f}% of total).
+- **Severe Inaccessibility (Threshold Lost):** **{lost:,}** residents cannot reach any hospital in {threshold:.0f} min.
+- **Delayed Coverage:** **{worsened:,}** residents remain within threshold but suffer rerouting delays.
+- **Total Accessibility Debt (AD):** **{debt:,.0f} population-minutes** ({impact.get('per_capita_debt_min', 0.0):.1f} min/person).
+
+---
+
+## 2. Demographic Equity & Vulnerability Assessment
+{f"⚠️ **DISPROPORTIONATE IMPACT IDENTIFIED:** {', '.join(dispro).upper()} populations suffer higher than average travel-time deterioration." if dispro else "✅ **EQUITY STATUS:** Delay impact is relatively uniform across demographic groups."}
+
+| Group | Avg Delay (Δ min) | Population Losing Coverage |
+| :--- | :--- | :--- |
+| **General Population** | +{eq.get('general', {}).get('delta_min', 0.0):.1f} min | {eq.get('general', {}).get('pop_lost_coverage', 0):,.0f} |
+| **Elderly (>65)** | +{eq.get('elderly', {}).get('delta_min', 0.0):.1f} min | {eq.get('elderly', {}).get('pop_lost_coverage', 0):,.0f} |
+| **Mobility-Limited** | +{eq.get('mobility', {}).get('delta_min', 0.0):.1f} min | {eq.get('mobility', {}).get('pop_lost_coverage', 0):,.0f} |
+| **Low-Car Households** | +{eq.get('lowcar', {}).get('delta_min', 0.0):.1f} min | {eq.get('lowcar', {}).get('pop_lost_coverage', 0):,.0f} |
+
+---
+
+## 3. Prioritized Recovery Interventions & Tactical Ranking
+
+| Priority | Intervention Measure | Pop. Restored | Avg Time Saved | Debt Reduction |
+| :--- | :--- | :--- | :--- | :--- |
+{top_interventions}
+
+---
+
+## 4. Operational Directives for Emergency Services & Traffic Police
+1. **Traffic Control:** Deploy field personnel to establish priority emergency signal corridors along the highest-ranked detour roads.
+2. **EMS Dispatch Advisory:** Reroute ambulance dispatch from isolated zones to adjacent secondary hospitals with surplus triage capacity.
+3. **Public Advisory:** Issue immediate travel alerts advising non-emergency vehicles to bypass restricted sectors.
+4. **Intervention Priority:** Implement Priority 1 action immediately to eliminate the majority of accumulated accessibility debt.
+
+---
+*Report generated automatically by AccessGrid Urban Accessibility Intelligence Engine.*
+"""
+    return report

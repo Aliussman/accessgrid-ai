@@ -234,3 +234,37 @@ def test_real_zone_impact_and_interventions(real_net):
     cands = interventions(real_net, edges, threshold=10.0, max_segments=2)
     assert cands
     assert cands[0]["kind"] == "reopen_all"
+
+
+# --------------------------------------------------------------------------
+# Isochrones, Presets, and Hospital Surge tests
+# --------------------------------------------------------------------------
+def test_travel_time_bands(small_net):
+    from src.engine import travel_time_bands
+    # nodes 0,3 at 0 min; 5 at 2 min; 1 at 3 min; 2 at 5 min; 4 at inf
+    times = {0: 0.0, 3: 0.0, 5: 2.0, 1: 3.0, 2: 5.0, 4: float("inf")}
+    bands = travel_time_bands(small_net, times)
+    assert "<5 min" in bands
+    assert "5-10 min" in bands
+    assert ">20 min / Isolated" in bands
+    assert bands["<5 min"]["nodes"] == 4  # nodes 0, 3, 5, 1
+    assert bands["5-10 min"]["nodes"] == 1  # node 2
+    assert bands[">20 min / Isolated"]["nodes"] == 1  # node 4
+
+
+def test_disaster_presets(small_net):
+    from src.engine import DISASTER_PRESETS, get_preset_edges
+    assert "monsoon_flood" in DISASTER_PRESETS
+    edges = get_preset_edges(small_net, "monsoon_flood")
+    assert isinstance(edges, list)
+
+
+def test_hospital_surge_analysis(small_net):
+    from src.engine import closure_impact, coverage, hospital_surge_analysis
+    baseline = coverage(small_net, threshold=10.0)
+    # isolate node 5 from hospital 3 (node 3)
+    impact = closure_impact(small_net, [(3, 5)], threshold=10.0, baseline=baseline)
+    surge = hospital_surge_analysis(small_net, baseline, impact)
+    assert len(surge) == 2
+    h1 = next(s for s in surge if s["name"] == "Hospital One")
+    assert h1["delta_pop"] == -50

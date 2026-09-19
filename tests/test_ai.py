@@ -90,12 +90,38 @@ def test_template_summary_includes_interventions():
     assert "Reopen all closed segments" in res["text"]
 
 
-def test_explain_interventions_template_best():
+def test_ask_copilot_offline_fallback():
     net = make_small_net()
-    res = ai.explain_interventions(make_impact(), _make_candidates(), net)
+    impact = make_impact()
+    candidates = _make_candidates()
+    
+    # Test debt query
+    res = ai.ask_copilot("What is the accessibility debt?", [], impact, net, candidates)
     assert res["provider"] == "template"
-    assert "Reopen all closed segments" in res["text"]
-    assert "50" in res["text"]
+    assert "accessibility debt" in res["text"].lower()
+
+    # Test hospital query
+    res_h = ai.ask_copilot("Which hospital is affected?", [], impact, net, candidates)
+    assert res_h["provider"] == "template"
+    assert "hospital" in res_h["text"].lower()
+
+    # Test intervention query
+    res_i = ai.ask_copilot("Which intervention helps most?", [], impact, net, candidates)
+    assert res_i["provider"] == "template"
+    assert "Reopen all closed segments" in res_i["text"]
+
+
+def test_generate_incident_action_plan():
+    net = make_small_net()
+    impact = make_impact()
+    candidates = _make_candidates()
+    
+    report = ai.generate_incident_action_plan(impact, net, candidates)
+    assert "# 📋 INCIDENT ACTION PLAN (IAP)" in report
+    assert "Executive Situational Overview" in report
+    assert "50" in report
+    assert "Reopen all closed segments" in report
+
 
 
 def test_explain_interventions_empty():
