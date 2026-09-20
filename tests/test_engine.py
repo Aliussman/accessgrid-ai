@@ -170,8 +170,7 @@ def test_zone_impact_score_normalized(small_net):
 def test_interventions_restore_leaf(small_net):
     imp = closure_impact(small_net, [(3, 5)], threshold=10.0)
     cands = interventions(small_net, [(3, 5)], threshold=10.0)
-    assert cands, "expected at least the reopen-all candidate"
-    assert cands[0]["kind"] == "reopen_all"
+    assert cands, "expected tactical candidates"
     assert cands[0]["population_restored"] == 50
     assert cands[0]["accessibility_recovery_pct"] == pytest.approx(100.0)
 
@@ -184,22 +183,22 @@ def test_interventions_noop_when_no_impact(small_net):
 def test_intervention_outcome(small_net):
     imp = closure_impact(small_net, [(3, 5)], threshold=10.0)
     cands = interventions(small_net, [(3, 5)], threshold=10.0)
-    reopen_all = next(c for c in cands if c["kind"] == "reopen_all")
-    out = intervention_outcome(small_net, [(3, 5)], reopen_all, threshold=10.0)
-    assert out["pop_affected"] == 0
-    assert out["pop_lost_coverage"] == 0
-    assert out["closed_edges"] == []
+    assert len(cands) > 0
+    top_cand = cands[0]
+    out = intervention_outcome(small_net, [(3, 5)], top_cand, threshold=10.0)
+    assert out["pop_affected"] <= imp["pop_affected"]
+    assert "debt_pop_minutes" in out
 
 
-def test_intervention_cap_many_segments(small_net):
-    # close both Main Road segments; cap selection to 1 to exercise top-k logic
-    cands = interventions(small_net, [(0, 1), (1, 2)], threshold=10.0,
-                          max_segments=1)
-    kinds = {c["kind"] for c in cands}
-    assert "reopen_all" in kinds
-    assert "reopen_one" in kinds
-    assert len(cands) <= 3
-    assert sum(c["kind"] == "reopen_one" for c in cands) == 1
+def test_intervention_scenario_specific(small_net):
+    # Test monsoon flood preset produces tailored flood mitigation interventions
+    flood_cands = interventions(small_net, [(0, 1), (1, 2)], threshold=10.0, preset_id="monsoon_flood")
+    assert len(flood_cands) <= 3
+    assert any("Dewatering" in c["name"] or "Flood" in c["category"] for c in flood_cands)
+
+    # Test VIP lockdown preset produces security-tailored interventions
+    vip_cands = interventions(small_net, [(0, 1), (1, 2)], threshold=10.0, preset_id="vip_lockdown")
+    assert any("Gate" in c["name"] or "Security" in c["category"] or "Transit" in c["name"] for c in vip_cands)
 
 
 # --------------------------------------------------------------------------
@@ -233,9 +232,11 @@ def test_real_zone_impact_and_interventions(real_net):
     imp = close_road(real_net, road, threshold=10.0)
     assert imp["closed_edges"] == edges
     assert "zone_impact_score" in imp
-    cands = interventions(real_net, edges, threshold=10.0, max_segments=2)
+    cands = interventions(real_net, edges, threshold=10.0, max_segments=2, road_name=road)
     assert cands
-    assert cands[0]["kind"] == "reopen_all"
+    assert len(cands) <= 3
+    assert cands[0]["name"]
+
 
 
 # --------------------------------------------------------------------------

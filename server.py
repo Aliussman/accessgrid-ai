@@ -383,7 +383,14 @@ def run_simulation(req: SimulateRequest):
     else:
         if closed_edges:
             impact = closure_impact(NET, closed_edges, req.threshold, baseline)
-            candidates = interventions(NET, closed_edges, req.threshold, baseline)
+            candidates = interventions(
+                NET,
+                closed_edges,
+                req.threshold,
+                baseline,
+                preset_id=req.preset_id,
+                road_name=req.road,
+            )
             for cand in candidates:
                 cand_boost = []
                 for item in cand.get("boost_edges", []):

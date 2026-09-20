@@ -514,16 +514,13 @@ def interventions(
     threshold: float = DEFAULT_THRESHOLD_MIN,
     baseline: Optional[dict] = None,
     max_segments: int = 8,
+    preset_id: Optional[str] = None,
+    road_name: Optional[str] = None,
 ) -> list[dict]:
-    """Rank candidate tactical interventions for a road-closure scenario.
+    """Rank candidate tactical interventions tailored specifically to the active scenario.
 
-    Candidates generated:
-      * Targeted Bottleneck Clearance (reopen single highest-yield chokepoint)
-      * Dedicated EMS Green-Wave Corridor (speed up detour around disruption)
-      * Tactical Mobile Triage Unit (deploy field clinic at highest-debt cluster)
-      * Phased Corridor Recovery (reopen individual major arterials in multi-road closures)
-      * Contraflow EMS Transit Lane (two-way emergency transit on parallel route)
-      * Comprehensive Network Clearance (full recovery benchmark)
+    Generates scenario-specific tactical recovery actions (flood dewatering vs VIP blue-light
+    corridors vs hazmat neutralization vs targeted urban arterial clearance).
     """
     if baseline is None:
         baseline = coverage(net, threshold)
@@ -546,120 +543,258 @@ def interventions(
 
     keyed = sorted(closed, key=_usage, reverse=True)
     worst = keyed[0]
-    worst_name = _edge_name(net, worst[0], worst[1]) or "Critical Arterial Section"
+    worst_name = _edge_name(net, worst[0], worst[1]) or (road_name or "Critical Arterial Section")
     top = keyed[:min(max_segments, 2)]
-    rest = keyed[min(max_segments, 2):] if len(closed) > 2 else []
 
-    candidates: list[dict] = []
-
-    # 1. Comprehensive Reopening (Instant Benchmark - Zero Dijkstra overhead)
-    candidates.append({
-        "kind": "reopen_all",
-        "category": "Full Network Recovery",
-        "name": "Comprehensive Network Clearance (All Corridors Cleared)",
-        "tactic": "Mobilize full-scale municipal operations across all affected sectors to restore all closed corridors simultaneously.",
-        "effort": "🔴 High (Full City Mobilization)",
-        "remove_edges": [],
-        "boost_edges": [],
-        "extra_sources": [],
-        "_fast_eval": {
-            "population_restored": int(disrupted["pop_lost_coverage"]),
-            "population_recovered": int(disrupted["pop_affected"]),
-            "avg_time_saved_min": float(disrupted["debt_pop_minutes"] / disrupted["pop_affected"]) if disrupted["pop_affected"] else 0.0,
-            "accessibility_recovery_pct": 100.0,
-            "debt_after_pop_min": 0.0,
-            "debt_reduction_pct": 100.0,
-        },
-    })
-
-    # 2. Targeted Bottleneck Clearance (Top critical segment)
-    worst_candidates = top[:1] if len(closed) > 5 else top
-    for e in worst_candidates:
-        e_name = _edge_name(net, e[0], e[1]) or f"Segment {e[0]}-{e[1]}"
-        others = [o for o in closed if o != e]
-        is_worst = (e == worst)
-        candidates.append({
-            "kind": "reopen_one",
-            "category": "Chokepoint Clearance" if is_worst else "Segment Clearance",
-            "name": f"Targeted Bottleneck Clearance: {e_name}" if is_worst else f"Reopen Arterial Segment: {e_name}",
-            "tactic": (
-                f"Deploy rapid mobile de-watering pumps and towing to clear the critical chokepoint on {e_name}."
-                if is_worst else
-                f"Clear localized obstruction on {e_name} to restore secondary bypass connectivity."
-            ),
-            "effort": "⚡ Low (1 Rapid Crew)",
-            "remove_edges": others,
-            "boost_edges": [],
-            "extra_sources": [],
-        })
-
-    # 3. Dedicated EMS Green-Wave Transit Corridor
+    # Resolve detour bypass route for green-wave
     bypass_edges, bypass_name = _find_bypass_corridor(net, closed, worst)
     if not bypass_edges:
         alt_legacy = _alternate_path(net, worst)
         if alt_legacy:
             bypass_edges = alt_legacy
             bypass_name = _path_corridor_name(net, alt_legacy)
+    if not bypass_name or bypass_name == "Detour Corridor":
+        bypass_name = "Adjacent Parallel Arterial"
 
-    if bypass_edges:
-        candidates.append({
-            "kind": "corridor",
-            "category": "Green-Wave EMS Corridor",
-            "name": f"Dedicated EMS Green-Wave Corridor: {bypass_name}",
-            "tactic": f"Activate dynamic traffic signal preemption (TSP) and dedicated police-escorted ambulance lanes along {bypass_name} (+40% transit speed).",
-            "effort": "🟢 Low (Signal Phasing)",
-            "remove_edges": closed,
-            "boost_edges": [(u, v, 0.6) for u, v in bypass_edges],
-            "extra_sources": [],
-        })
-
-    # 4. Phased Corridor Reopenings (Top 1-2 major corridors if multi-road closure)
-    road_groups: dict[str, list[tuple[int, int]]] = {}
-    for u, v in closed:
-        rname = _edge_name(net, u, v)
-        if rname:
-            road_groups.setdefault(rname, []).append((u, v))
-
-    if len(road_groups) > 1:
-        top_corridors = sorted(road_groups.items(), key=lambda kv: len(kv[1]), reverse=True)[:2]
-        for rname, redges in top_corridors:
-            candidates.append({
-                "kind": "phased_corridor",
-                "category": "Phased Corridor Recovery",
-                "name": f"Priority Corridor Clearance: Reopen {rname}",
-                "tactic": f"Concentrate municipal heavy machinery and civil defense crews exclusively on {rname} first to re-establish primary arterial throughput before secondary links.",
-                "effort": "🟠 Moderate (Dedicated Fleet)",
-                "remove_edges": [e for e in closed if e not in set(redges)],
-                "boost_edges": [],
-                "extra_sources": [],
-            })
-
-    # 5. Deploy Tactical Mobile Triage Unit (Field Stabilization Pod)
-    if disrupted.get("zone_impact") and len(closed) > 2:
+    # Identify most delayed sector node for mobile triage
+    hotspot_node = None
+    hotspot_label = "Delayed Sector Hub"
+    hotspot_coord = None
+    if disrupted.get("zone_impact"):
         hotspot_node = max(disrupted["zone_impact"].items(), key=lambda kv: kv[1])[0]
         hotspot_d = net.graph.nodes[hotspot_node]
         if "x" in hotspot_d and "y" in hotspot_d:
             neighbors = list(net.graph.neighbors(hotspot_node))
-            hotspot_street = _edge_name(net, hotspot_node, neighbors[0]) if neighbors else "Hazard Sector"
-            hotspot_label = hotspot_street or f"Sector Node {hotspot_node}"
+            hotspot_street = _edge_name(net, hotspot_node, neighbors[0]) if neighbors else ""
+            hotspot_label = hotspot_street or f"Sector Node #{hotspot_node}"
+            hotspot_coord = {
+                "lat": float(hotspot_d.get("y", 0.0)),
+                "lng": float(hotspot_d.get("x", 0.0)),
+                "node_id": hotspot_node,
+            }
+
+    candidates: list[dict] = []
+
+    # --------------------------------------------------------------------------
+    # 1. Scenario-Tailored Tactical Generation
+    # --------------------------------------------------------------------------
+    if preset_id == "monsoon_flood":
+        # Flood Tactical 1: Heavy Dewatering Pumps at Submerged Underpasses
+        candidates.append({
+            "kind": "reopen_one",
+            "category": "Flood Mitigation & Dewatering",
+            "name": f"Targeted Dewatering at Inundated Underpass: {worst_name}",
+            "tactic": f"Deploy 4,000 LPM municipal mobile dewatering pumps and silt clearance teams to drain submerged underpasses on {worst_name}.",
+            "effort": "⚡ Low (1 Rapid Pump Crew)",
+            "remove_edges": [o for o in closed if o != worst],
+            "boost_edges": [],
+            "extra_sources": [],
+        })
+
+        # Flood Tactical 2: Elevated Arterial Green-Wave Corridor
+        if bypass_edges:
+            candidates.append({
+                "kind": "corridor",
+                "category": "Elevated Detour Wave",
+                "name": f"Elevated Arterial Green-Wave: {bypass_name}",
+                "tactic": f"Divert ambulances onto the elevated flood-resistant corridor along {bypass_name} with synchronized signal preemption (+40% speed).",
+                "effort": "🟢 Low (Signal Retiming)",
+                "remove_edges": closed,
+                "boost_edges": [(u, v, 0.6) for u, v in bypass_edges],
+                "extra_sources": [],
+            })
+
+        # Flood Tactical 3: Amphibious High-Clearance Rescue Pod
+        if hotspot_node is not None:
             candidates.append({
                 "kind": "mobile_facility",
-                "category": "Mobile Triage Unit",
-                "name": f"Deploy Mobile Triage Pod: Near {hotspot_label}",
-                "tactic": f"Position an Advanced Life Support (ALS) mobile field triage unit at {hotspot_label}, instantly restoring emergency stabilization within the 8-minute golden window.",
+                "category": "Amphibious EMS Staging",
+                "name": f"Stage High-Clearance 4x4 Rescue Unit: Near {hotspot_label}",
+                "tactic": f"Position a high-clearance SDRF rescue ambulance and tactical watercraft unit at {hotspot_label} to extract critical patients from flooded sectors.",
+                "effort": "🟡 Medium (1 SDRF Unit)",
+                "remove_edges": closed,
+                "boost_edges": [],
+                "extra_sources": [hotspot_node],
+                "facility_node": hotspot_node,
+                "facility_coord": hotspot_coord,
+            })
+
+    elif preset_id == "vip_lockdown":
+        # VIP Tactical 1: Blue-Light EMS Security Gate Passage
+        candidates.append({
+            "kind": "reopen_one",
+            "category": "Security Perimeter Gate",
+            "name": f"Negotiate Blue-Light Transit Gate: {worst_name}",
+            "tactic": f"Establish an automated security clearance protocol with Police Command on {worst_name} to grant immediate passage to registered ambulances.",
+            "effort": "⚡ Low (Police Protocol)",
+            "remove_edges": [o for o in closed if o != worst],
+            "boost_edges": [],
+            "extra_sources": [],
+        })
+
+        # VIP Tactical 2: Outer Ring Contraflow Lane
+        if bypass_edges:
+            candidates.append({
+                "kind": "corridor",
+                "category": "Contraflow Transit Wave",
+                "name": f"Contraflow EMS Priority Lane: {bypass_name}",
+                "tactic": f"Designate a dedicated contraflow lane on outer arterial {bypass_name} protected by traffic marshals for unhindered transit around the VIP cordon.",
+                "effort": "🟢 Low (Traffic Marshals)",
+                "remove_edges": closed,
+                "boost_edges": [(u, v, 0.6) for u, v in bypass_edges],
+                "extra_sources": [],
+            })
+
+        # VIP Tactical 3: Outer Perimeter Mobile Triage
+        if hotspot_node is not None:
+            candidates.append({
+                "kind": "mobile_facility",
+                "category": "Perimeter Mobile Triage",
+                "name": f"Deploy Advanced Triage Pod Outside Cordon: Near {hotspot_label}",
+                "tactic": f"Position an ALS mobile clinic just outside the security barricade at {hotspot_label} to treat sector patients without passing security checkpoints.",
                 "effort": "🟡 Medium (1 Mobile Unit)",
                 "remove_edges": closed,
                 "boost_edges": [],
                 "extra_sources": [hotspot_node],
                 "facility_node": hotspot_node,
-                "facility_coord": {
-                    "lat": float(hotspot_d.get("y", 0.0)),
-                    "lng": float(hotspot_d.get("x", 0.0)),
-                    "node_id": hotspot_node,
-                },
+                "facility_coord": hotspot_coord,
             })
 
-    # Limit to top 3 distinct strategic candidates for optimal sub-second response time
+    elif preset_id in ("industrial_hazard", "hazmat_spill"):
+        # Hazmat Tactical 1: Chemical Neutralization & Upwind Clearance
+        candidates.append({
+            "kind": "reopen_one",
+            "category": "Hazmat Containment & Decon",
+            "name": f"Neutralization & Hazmat Decontamination: {worst_name}",
+            "tactic": f"Deploy NDRF chemical neutralization fogging units and vapor suppression foam on {worst_name} to secure and reopen the primary logistics corridor.",
+            "effort": "🟠 Moderate (Hazmat Crew)",
+            "remove_edges": [o for o in closed if o != worst],
+            "boost_edges": [],
+            "extra_sources": [],
+        })
+
+        # Hazmat Tactical 2: Upwind Plume-Bypass Corridor
+        if bypass_edges:
+            candidates.append({
+                "kind": "corridor",
+                "category": "Upwind Transit Corridor",
+                "name": f"Upwind Plume-Bypass Route: {bypass_name}",
+                "tactic": f"Channel all medical transports strictly upwind along {bypass_name} with automated variable message signs directing civilian traffic away from toxic plume.",
+                "effort": "🟢 Low (VMS Signs + TSP)",
+                "remove_edges": closed,
+                "boost_edges": [(u, v, 0.6) for u, v in bypass_edges],
+                "extra_sources": [],
+            })
+
+        # Hazmat Tactical 3: Respiratory Triage Post
+        if hotspot_node is not None:
+            candidates.append({
+                "kind": "mobile_facility",
+                "category": "Respiratory Triage Post",
+                "name": f"Deploy Oxygenation & Triage Post: Near {hotspot_label}",
+                "tactic": f"Set up mobile mass-casualty respiratory stabilization and oxygen therapy post at {hotspot_label} to treat inhalation patients immediately.",
+                "effort": "🟡 Medium (1 Mobile Unit)",
+                "remove_edges": closed,
+                "boost_edges": [],
+                "extra_sources": [hotspot_node],
+                "facility_node": hotspot_node,
+                "facility_coord": hotspot_coord,
+            })
+
+    elif road_name:
+        # Targeted Road Name Closure
+        candidates.append({
+            "kind": "reopen_one",
+            "category": "Chokepoint Clearance",
+            "name": f"Rapid Towing & Obstruction Removal: {worst_name}",
+            "tactic": f"Dispatch heavy hydraulic towing cranes and emergency highway patrol to immediately clear disabled vehicles or debris from the critical bottleneck on {worst_name}.",
+            "effort": "⚡ Low (1 Rapid Tow Crew)",
+            "remove_edges": [o for o in closed if o != worst],
+            "boost_edges": [],
+            "extra_sources": [],
+        })
+
+        if bypass_edges:
+            candidates.append({
+                "kind": "corridor",
+                "category": "Parallel Arterial Wave",
+                "name": f"Adaptive Signal Synchronization: {bypass_name}",
+                "tactic": f"Extend green splits by +35 seconds along parallel arterial {bypass_name} to absorb diverted traffic without creating secondary bottlenecks.",
+                "effort": "🟢 Low (Signal Retiming)",
+                "remove_edges": closed,
+                "boost_edges": [(u, v, 0.6) for u, v in bypass_edges],
+                "extra_sources": [],
+            })
+
+        if hotspot_node is not None:
+            candidates.append({
+                "kind": "mobile_facility",
+                "category": "Tactical EMS Staging",
+                "name": f"Deploy Rapid Paramedic QRV Unit: Near {hotspot_label}",
+                "tactic": f"Position a paramedic quick-response vehicle (QRV) at {hotspot_label} to provide rapid pre-hospital stabilization for the delayed residential sector.",
+                "effort": "🟡 Medium (1 Paramedic QRV)",
+                "remove_edges": closed,
+                "boost_edges": [],
+                "extra_sources": [hotspot_node],
+                "facility_node": hotspot_node,
+                "facility_coord": hotspot_coord,
+            })
+
+    else:
+        # Custom Map Blockade / Two-Node Cut
+        candidates.append({
+            "kind": "reopen_one",
+            "category": "Corridor Reopening",
+            "name": f"Targeted Roadway Clearance: {worst_name}",
+            "tactic": f"Deploy field road maintenance crew to remove barricades/obstructions along the selected road segment on {worst_name}.",
+            "effort": "⚡ Low (1 Maintenance Crew)",
+            "remove_edges": [o for o in closed if o != worst],
+            "boost_edges": [],
+            "extra_sources": [],
+        })
+
+        if bypass_edges:
+            candidates.append({
+                "kind": "corridor",
+                "category": "Detour Priority Corridor",
+                "name": f"Emergency Green-Wave Wave: {bypass_name}",
+                "tactic": f"Activate green-wave signal preemption for emergency vehicles along detour route {bypass_name}.",
+                "effort": "🟢 Low (Signal Phasing)",
+                "remove_edges": closed,
+                "boost_edges": [(u, v, 0.6) for u, v in bypass_edges],
+                "extra_sources": [],
+            })
+
+        if hotspot_node is not None:
+            candidates.append({
+                "kind": "mobile_facility",
+                "category": "Mobile Triage Unit",
+                "name": f"Stage Paramedic Unit: Near {hotspot_label}",
+                "tactic": f"Deploy a mobile emergency care station at {hotspot_label} to safeguard isolated residents during the closure.",
+                "effort": "🟡 Medium (1 Mobile Unit)",
+                "remove_edges": closed,
+                "boost_edges": [],
+                "extra_sources": [hotspot_node],
+                "facility_node": hotspot_node,
+                "facility_coord": hotspot_coord,
+            })
+
+    # Fallback to general candidates if fewer than 3
+    if len(candidates) < 3 and hotspot_node is not None:
+        candidates.append({
+            "kind": "mobile_facility",
+            "category": "Mobile Triage Unit",
+            "name": f"Deploy Mobile Triage Pod: Near {hotspot_label}",
+            "tactic": f"Position an ALS mobile field triage unit at {hotspot_label} to provide emergency stabilization within the golden hour.",
+            "effort": "🟡 Medium (1 Mobile Unit)",
+            "remove_edges": closed,
+            "boost_edges": [],
+            "extra_sources": [hotspot_node],
+            "facility_node": hotspot_node,
+            "facility_coord": hotspot_coord,
+        })
+
+    # Limit to top 3 distinct strategic candidates
     candidates = candidates[:3]
 
     results = []
