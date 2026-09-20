@@ -1,0 +1,1006 @@
+{
+  "type": "FeatureCollection",
+  "name": "destinations.geojson",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('node', 10093848159)",
+        "name": "Unnamed hospital 1",
+        "lat": 30.6687207,
+        "lon": 76.7207238,
+        "node_id": 11867947557,
+        "type": "Hospital",
+        "capacity": 446,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.7207238,
+          30.6687207
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 113779330)",
+        "name": "Superintended Hospital Engineer Building",
+        "lat": 30.76522785,
+        "lon": 76.77557688783588,
+        "node_id": 6968293920,
+        "type": "Hospital",
+        "capacity": 807,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.77557688783588,
+          30.76522785
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 129023343)",
+        "name": "Ivy Health and Life Sciences Pvt. Ltd",
+        "lat": 30.70663265,
+        "lon": 76.70831578781973,
+        "node_id": 1424396439,
+        "type": "Hospital",
+        "capacity": 966,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.70831578781973,
+          30.70663265
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 129453616)",
+        "name": "GMCH SECTOR 32",
+        "lat": 30.7091585,
+        "lon": 76.7813136336239,
+        "node_id": 5527027214,
+        "type": "Hospital",
+        "capacity": 119,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.7813136336239,
+          30.7091585
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 129453735)",
+        "name": "Unnamed hospital 5",
+        "lat": 30.70844215,
+        "lon": 76.77739649979577,
+        "node_id": 1428254763,
+        "type": "Hospital",
+        "capacity": 606,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.77739649979577,
+          30.70844215
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 129782458)",
+        "name": "GMSH Sector-16",
+        "lat": 30.7508839,
+        "lon": 76.7809053708603,
+        "node_id": 10277173475,
+        "type": "Hospital",
+        "capacity": 127,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.7809053708603,
+          30.7508839
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 129877132)",
+        "name": "Civil Hospital Panchkula",
+        "lat": 30.70461135,
+        "lon": 76.85563474390437,
+        "node_id": 6877544472,
+        "type": "Hospital",
+        "capacity": 15,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.85563474390437,
+          30.70461135
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 130274562)",
+        "name": "Command Hospital",
+        "lat": 30.71324535,
+        "lon": 76.8551813318822,
+        "node_id": 10733461079,
+        "type": "Hospital",
+        "capacity": 31,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.8551813318822,
+          30.71324535
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 130282368)",
+        "name": "Alchemist Hospital, Panchkula",
+        "lat": 30.6745527,
+        "lon": 76.86482749038268,
+        "node_id": 1435398985,
+        "type": "Hospital",
+        "capacity": 592,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.86482749038268,
+          30.6745527
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 155001233)",
+        "name": "Cancer Hospital",
+        "lat": 30.7633794,
+        "lon": 76.78099381086884,
+        "node_id": 6330060302,
+        "type": "Hospital",
+        "capacity": 810,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.78099381086884,
+          30.7633794
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 155001235)",
+        "name": "New OPD",
+        "lat": 30.762894,
+        "lon": 76.7807957007498,
+        "node_id": 6330060302,
+        "type": "Hospital",
+        "capacity": 358,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.7807957007498,
+          30.762894
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 410543291)",
+        "name": "Fortis Hospital",
+        "lat": 30.6947989,
+        "lon": 76.73106987062636,
+        "node_id": 4833992753,
+        "type": "Hospital",
+        "capacity": 83,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.73106987062636,
+          30.6947989
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1058106342)",
+        "name": "Ojas Hospital",
+        "lat": 30.6609955,
+        "lon": 76.88227740180716,
+        "node_id": 1435398657,
+        "type": "Hospital",
+        "capacity": 536,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.88227740180716,
+          30.6609955
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1059472337)",
+        "name": "Government Poly Clinic",
+        "lat": 30.66148005,
+        "lon": 76.88242750816454,
+        "node_id": 1435398657,
+        "type": "Hospital",
+        "capacity": 70,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.88242750816454,
+          30.66148005
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1097915747)",
+        "name": "Om Hospital",
+        "lat": 30.65683185,
+        "lon": 76.88379570001919,
+        "node_id": 1435398657,
+        "type": "Hospital",
+        "capacity": 378,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.88379570001919,
+          30.65683185
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1099801803)",
+        "name": "Paras Hospital",
+        "lat": 30.6933977,
+        "lon": 76.88328244085514,
+        "node_id": 1432142597,
+        "type": "Hospital",
+        "capacity": 731,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.88328244085514,
+          30.6933977
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1153423420)",
+        "name": "RHTC Palsora",
+        "lat": 30.734796,
+        "lon": 76.7178111146533,
+        "node_id": 10088686434,
+        "type": "Hospital",
+        "capacity": 591,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.7178111146533,
+          30.734796
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1194654675)",
+        "name": "Bright Kidney Care Hospital",
+        "lat": 30.65774645,
+        "lon": 76.87699377527552,
+        "node_id": 9169316691,
+        "type": "Hospital",
+        "capacity": 533,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.87699377527552,
+          30.65774645
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1207648642)",
+        "name": "Prolife Hospital",
+        "lat": 30.68356105,
+        "lon": 76.86588166729425,
+        "node_id": 1985586732,
+        "type": "Hospital",
+        "capacity": 525,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.86588166729425,
+          30.68356105
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1360772601)",
+        "name": "Mental Health Institute",
+        "lat": 30.70426345,
+        "lon": 76.77514814266081,
+        "node_id": 12749642680,
+        "type": "Hospital",
+        "capacity": 328,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.77514814266081,
+          30.70426345
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "('way', 1462760191)",
+        "name": "Mother Teresa Saket Orthopaedic Hospital",
+        "lat": 30.7012327,
+        "lon": 76.8670466436087,
+        "node_id": 1432156332,
+        "type": "Hospital",
+        "capacity": 443,
+        "category": "hospital"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.8670466436087,
+          30.7012327
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_1",
+        "name": "Panjab University (PU)",
+        "lat": 30.76,
+        "lon": 76.768,
+        "node_id": 7053388389,
+        "type": "University",
+        "category": "school",
+        "capacity": 18000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.768,
+          30.76
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_2",
+        "name": "IISER Mohali (Science Institute)",
+        "lat": 30.6652,
+        "lon": 76.729,
+        "node_id": 9448880003,
+        "type": "Institute",
+        "category": "school",
+        "capacity": 2500
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.729,
+          30.6652
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_3",
+        "name": "Delhi Public School (DPS Chandigarh)",
+        "lat": 30.723,
+        "lon": 76.745,
+        "node_id": 1427179198,
+        "type": "School",
+        "category": "school",
+        "capacity": 3200
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.745,
+          30.723
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_4",
+        "name": "Vivek High School (Sector 38)",
+        "lat": 30.7485,
+        "lon": 76.746,
+        "node_id": 1428412353,
+        "type": "School",
+        "category": "school",
+        "capacity": 2200
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.746,
+          30.7485
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_5",
+        "name": "St. John\u2019s High School (Sector 26)",
+        "lat": 30.725,
+        "lon": 76.804,
+        "node_id": 11846841642,
+        "type": "School",
+        "category": "school",
+        "capacity": 2800
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.804,
+          30.725
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_6",
+        "name": "Carmel Convent School (Sector 9)",
+        "lat": 30.748,
+        "lon": 76.79,
+        "node_id": 1430575236,
+        "type": "School",
+        "category": "school",
+        "capacity": 2100
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.79,
+          30.748
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_7",
+        "name": "St. Kabir Public School (Sector 26)",
+        "lat": 30.726,
+        "lon": 76.809,
+        "node_id": 12102913246,
+        "type": "School",
+        "category": "school",
+        "capacity": 1900
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.809,
+          30.726
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_8",
+        "name": "Sacred Heart Senior Secondary (Sec 26)",
+        "lat": 30.73,
+        "lon": 76.805,
+        "node_id": 1429381191,
+        "type": "School",
+        "category": "school",
+        "capacity": 2400
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.805,
+          30.73
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_9",
+        "name": "Ryan International School (Sector 49)",
+        "lat": 30.697,
+        "lon": 76.749,
+        "node_id": 6330370097,
+        "type": "School",
+        "category": "school",
+        "capacity": 2600
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.749,
+          30.697
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_10",
+        "name": "Manav Mangal Smart School (Phase 10)",
+        "lat": 30.686,
+        "lon": 76.728,
+        "node_id": 3900337983,
+        "type": "School",
+        "category": "school",
+        "capacity": 3100
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.728,
+          30.686
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_11",
+        "name": "Yadavindra Public School (YPS Mohali)",
+        "lat": 30.709,
+        "lon": 76.72,
+        "node_id": 1425319194,
+        "type": "School",
+        "category": "school",
+        "capacity": 1800
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.72,
+          30.709
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_12",
+        "name": "Learning Paths School (Sector 67)",
+        "lat": 30.683,
+        "lon": 76.736,
+        "node_id": 1424618455,
+        "type": "School",
+        "category": "school",
+        "capacity": 1600
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.736,
+          30.683
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_13",
+        "name": "NIPER Mohali (Pharmacy Institute)",
+        "lat": 30.677,
+        "lon": 76.735,
+        "node_id": 11836632046,
+        "type": "Institute",
+        "category": "school",
+        "capacity": 1400
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.735,
+          30.677
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_14",
+        "name": "Government Model Senior Secondary (Sec 16)",
+        "lat": 30.746,
+        "lon": 76.779,
+        "node_id": 1431135515,
+        "type": "School",
+        "category": "school",
+        "capacity": 1500
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.779,
+          30.746
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "school_15",
+        "name": "DAV College (Sector 10)",
+        "lat": 30.758,
+        "lon": 76.788,
+        "node_id": 1431157535,
+        "type": "College",
+        "category": "school",
+        "capacity": 4500
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.788,
+          30.758
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_1",
+        "name": "Sector 17 Commercial Plaza (City Center)",
+        "lat": 30.74,
+        "lon": 76.778,
+        "node_id": 1431040058,
+        "type": "Commercial Center",
+        "category": "market",
+        "capacity": 35000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.778,
+          30.74
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_2",
+        "name": "Elante Mall & Commercial Complex",
+        "lat": 30.7055,
+        "lon": 76.801,
+        "node_id": 1429336852,
+        "type": "Shopping Mall",
+        "category": "market",
+        "capacity": 42000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.801,
+          30.7055
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_3",
+        "name": "Sector 22 Shastri Market",
+        "lat": 30.731,
+        "lon": 76.771,
+        "node_id": 1429078244,
+        "type": "Bazaar / Market",
+        "category": "market",
+        "capacity": 28000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.771,
+          30.731
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_4",
+        "name": "Sector 35 Food & Commercial Strip",
+        "lat": 30.722,
+        "lon": 76.764,
+        "node_id": 7087181866,
+        "type": "Commercial Hub",
+        "category": "market",
+        "capacity": 19000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.764,
+          30.722
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_5",
+        "name": "Phase 7 Mohali Main Commercial Market",
+        "lat": 30.704,
+        "lon": 76.711,
+        "node_id": 6475591022,
+        "type": "Bazaar / Market",
+        "category": "market",
+        "capacity": 22000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.711,
+          30.704
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_6",
+        "name": "Sector 8 Inner Market",
+        "lat": 30.742,
+        "lon": 76.8,
+        "node_id": 11847108299,
+        "type": "Marketplace",
+        "category": "market",
+        "capacity": 12000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.8,
+          30.742
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_7",
+        "name": "Phase 3B2 Mohali Food Plaza",
+        "lat": 30.716,
+        "lon": 76.712,
+        "node_id": 1425319561,
+        "type": "Commercial Plaza",
+        "category": "market",
+        "capacity": 16000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.712,
+          30.716
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_8",
+        "name": "Sector 26 Grain & Vegetable Market",
+        "lat": 30.721,
+        "lon": 76.812,
+        "node_id": 6324569169,
+        "type": "Wholesale Market",
+        "category": "market",
+        "capacity": 25000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.812,
+          30.721
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_9",
+        "name": "Sector 43 Inter-State Terminal & Market",
+        "lat": 30.718,
+        "lon": 76.744,
+        "node_id": 1427203369,
+        "type": "Transit & Retail",
+        "category": "market",
+        "capacity": 30000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.744,
+          30.718
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_10",
+        "name": "Sector 15 Patel Market",
+        "lat": 30.751,
+        "lon": 76.773,
+        "node_id": 5524165805,
+        "type": "Bazaar / Market",
+        "category": "market",
+        "capacity": 15000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.773,
+          30.751
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_11",
+        "name": "Kharar Main Market",
+        "lat": 30.743,
+        "lon": 76.645,
+        "node_id": 4840966364,
+        "type": "Bazaar / Market",
+        "category": "market",
+        "capacity": 18000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.645,
+          30.743
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_12",
+        "name": "Phase 5 Mohali Market",
+        "lat": 30.724,
+        "lon": 76.723,
+        "node_id": 1425545518,
+        "type": "Marketplace",
+        "category": "market",
+        "capacity": 14000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.723,
+          30.724
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_13",
+        "name": "Sector 9 Boutiques & High Street",
+        "lat": 30.747,
+        "lon": 76.793,
+        "node_id": 4832734271,
+        "type": "Commercial Hub",
+        "category": "market",
+        "capacity": 11000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.793,
+          30.747
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": "market_14",
+        "name": "Bestech Square Mall (Sector 66)",
+        "lat": 30.676,
+        "lon": 76.74,
+        "node_id": 6888348719,
+        "type": "Shopping Mall",
+        "category": "market",
+        "capacity": 20000
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          76.74,
+          30.676
+        ]
+      }
+    }
+  ]
+}

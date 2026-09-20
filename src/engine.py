@@ -18,8 +18,7 @@ from typing import Optional
 import geopandas as gpd
 import networkx as nx
 import pandas as pd
-
-from .config import DATA_DIR, DEFAULT_THRESHOLD_MIN, HOSPITALS_PATH, POP_PATH
+from .config import DATA_DIR, DEFAULT_THRESHOLD_MIN, DESTINATIONS_PATH, HOSPITALS_PATH, POP_PATH
 
 INF = float("inf")
 
@@ -37,18 +36,30 @@ def load_graph() -> nx.MultiGraph:
     return G
 
 
-def load_hospitals() -> gpd.GeoDataFrame:
-    df = gpd.read_file(str(HOSPITALS_PATH))
+def load_destinations(data_dir=None, category: str = "all") -> gpd.GeoDataFrame:
+    """Load points of interest (hospitals, schools, markets) with snapped graph node_ids."""
+    path = DESTINATIONS_PATH if DESTINATIONS_PATH.exists() else HOSPITALS_PATH
+    df = gpd.read_file(str(path))
     df["node_id"] = df["node_id"].astype(int)
     df["name"] = df["name"].astype(str)
-    # Backwards compatibility for cached files built before type/capacity.
+    if "category" not in df.columns:
+        df["category"] = "hospital"
     if "type" not in df.columns:
-        df["type"] = "Hospital"
+        df["type"] = "Facility"
     if "capacity" not in df.columns:
         df["capacity"] = 0
     df["capacity"] = df["capacity"].fillna(0).astype(int)
-    df["type"] = df["type"].fillna("Hospital").astype(str)
+    df["type"] = df["type"].fillna("Facility").astype(str)
+    df["category"] = df["category"].fillna("hospital").astype(str)
+
+    if category != "all":
+        df = df[df["category"] == category].copy()
     return df
+
+
+def load_hospitals() -> gpd.GeoDataFrame:
+    """Backwards-compatible loader for hospital amenities."""
+    return load_destinations(category="hospital")
 
 
 def load_population() -> dict[int, int]:
@@ -75,6 +86,7 @@ def load_vulnerability() -> dict[int, dict[str, float]]:
 class Network:
     graph: nx.MultiGraph
     hospitals: gpd.GeoDataFrame
+    destinations: gpd.GeoDataFrame = field(default_factory=gpd.GeoDataFrame)
     population: dict[int, int] = field(default_factory=dict)
     vulnerability: dict[int, dict[str, float]] = field(default_factory=dict)
     _coverage_cache: dict[float, dict] = field(default_factory=dict)
@@ -83,14 +95,18 @@ class Network:
 
     @classmethod
     def load(cls, data_dir=None) -> "Network":
-        hosp = load_hospitals()
+        all_dest = load_destinations(data_dir, category="all")
+        hosp = all_dest[all_dest["category"] == "hospital"]
+        if len(hosp) == 0:
+            hosp = load_hospitals()
         osm_by_node = {
-            int(row["node_id"]): str(row["osm_id"])
-            for _, row in hosp.iterrows()
+            int(row["node_id"]): str(row.get("osm_id", row["node_id"]))
+            for _, row in all_dest.iterrows()
         }
         return cls(
             graph=load_graph(),
             hospitals=hosp,
+            destinations=all_dest,
             population=load_population(),
             vulnerability=load_vulnerability(),
             _osm_by_node=osm_by_node,
@@ -1237,3 +1253,157 @@ def facility_node_for_road(net: Network, road_name: str) -> int | None:
             if d < best_d:
                 best, best_d = n, d
     return best
+
+
+def nearest_node_to_coord(net: Network, lat: float, lng: float) -> Optional[int]:
+    """Find the closest graph node to a lat/lng coordinate."""
+    best_n = None
+    best_d = INF
+    for n, d in net.graph.nodes(data=True):
+        if "y" in d and "x" in d:
+            ny, nx_ = float(d["y"]), float(d["x"])
+            dist = (ny - lat) ** 2 + (nx_ - lng) ** 2
+            if dist < best_d:
+                best_d = dist
+                best_n = int(n)
+    return best_n
+
+
+def _find_dijkstra_path(
+    G: nx.MultiGraph,
+    origin: int,
+    dest_targets: set[int],
+    closed_set: Optional[set[tuple[int, int]]] = None,
+) -> tuple[Optional[int], list[int], float]:
+    """Find shortest path from origin node to any target in dest_targets."""
+    if origin in dest_targets:
+        return origin, [origin], 0.0
+
+    pq = [(0.0, origin, [origin])]
+    visited: dict[int, float] = {}
+
+    while pq:
+        t, u, path = heapq.heappop(pq)
+        if u in visited and visited[u] <= t:
+            continue
+        visited[u] = t
+
+        if u in dest_targets:
+            return u, path, t
+
+        for v, edge_dict in G[u].items():
+            if closed_set:
+                edge_pair = (min(u, v), max(u, v))
+                if edge_pair in closed_set:
+                    continue
+            min_cost = min(float(d.get("travel_time", 1.0)) for d in edge_dict.values())
+            if v not in visited or t + min_cost < visited[v]:
+                heapq.heappush(pq, (t + min_cost, v, path + [v]))
+
+    return None, [], INF
+
+
+def _path_to_coords(net: Network, path: list[int]) -> list[list[float]]:
+    coords = []
+    for n in path:
+        d = net.graph.nodes[n]
+        if "y" in d and "x" in d:
+            coords.append([float(d["y"]), float(d["x"])])
+    return coords
+
+
+def compute_point_route(
+    net: Network,
+    origin_node: int,
+    dest_nodes: Optional[list[int]] = None,
+    closed_edges: list[tuple[int, int]] = (),
+    category: str = "hospital",
+) -> dict:
+    """Compute original and alternative detour routes from an origin to destination."""
+    if not dest_nodes:
+        if hasattr(net, "destinations") and len(net.destinations) > 0:
+            if category == "all":
+                df = net.destinations
+            else:
+                df = net.destinations[net.destinations["category"] == category]
+            if len(df) == 0:
+                df = net.hospitals
+            dest_nodes = [int(n) for n in df["node_id"]]
+        else:
+            dest_nodes = [int(n) for n in net.hospitals["node_id"]]
+
+    dest_set = set(dest_nodes)
+    closed_set = set((min(u, v), max(u, v)) for u, v in closed_edges) if closed_edges else None
+
+    # 1. Baseline Route (Normal network)
+    orig_target, orig_path, orig_time = _find_dijkstra_path(net.graph, origin_node, dest_set, closed_set=None)
+
+    # 2. Detour / Alternative Route (Disrupted network)
+    detour_target, detour_path, detour_time = _find_dijkstra_path(net.graph, origin_node, dest_set, closed_set=closed_set)
+
+    # Find destination metadata
+    dest_meta = {}
+    chosen_dest = detour_target if detour_target is not None else orig_target
+    if chosen_dest is not None and hasattr(net, "destinations") and len(net.destinations) > 0:
+        match = net.destinations[net.destinations["node_id"] == chosen_dest]
+        if len(match) > 0:
+            row = match.iloc[0]
+            dest_meta = {
+                "name": str(row["name"]),
+                "category": str(row.get("category", "facility")),
+                "type": str(row.get("type", "Facility")),
+                "capacity": int(row.get("capacity", 0)),
+                "node_id": int(chosen_dest),
+            }
+
+    orig_edges = set((min(orig_path[i], orig_path[i+1]), max(orig_path[i], orig_path[i+1])) for i in range(len(orig_path)-1)) if len(orig_path) > 1 else set()
+    hit_closed = bool(closed_set and (orig_edges & closed_set)) if closed_set else False
+
+    delay = (detour_time - orig_time) if (detour_time != INF and orig_time != INF) else 0.0
+
+    return {
+        "success": (orig_target is not None or detour_target is not None),
+        "origin_node": int(origin_node),
+        "destination": dest_meta,
+        "is_diverted": hit_closed or (detour_path != orig_path and bool(closed_edges)),
+        "baseline_time_min": float(orig_time) if orig_time != INF else None,
+        "detour_time_min": float(detour_time) if detour_time != INF else None,
+        "delay_min": max(float(delay), 0.0),
+        "baseline_route": _path_to_coords(net, orig_path),
+        "detour_route": _path_to_coords(net, detour_path),
+        "nodes_count_baseline": len(orig_path),
+        "nodes_count_detour": len(detour_path),
+    }
+
+
+def get_primary_alternative_route(
+    net: Network,
+    closed_edges: list[tuple[int, int]],
+    category: str = "hospital",
+) -> Optional[dict]:
+    """Find the most affected population origin and return its baseline vs detour alternative route."""
+    if not closed_edges:
+        return None
+
+    candidate_origins = []
+    for u, v in closed_edges[:5]:
+        candidate_origins.extend([u, v])
+        for n in list(net.graph.neighbors(u))[:2] + list(net.graph.neighbors(v))[:2]:
+            candidate_origins.append(n)
+
+    if not candidate_origins:
+        return None
+
+    candidate_origins.sort(key=lambda n: net.population.get(n, 0), reverse=True)
+    best_route = None
+    max_delay = -1.0
+
+    for orig in candidate_origins[:6]:
+        r = compute_point_route(net, orig, closed_edges=closed_edges, category=category)
+        if r.get("success") and r.get("is_diverted"):
+            delay = r.get("delay_min", 0.0)
+            if delay > max_delay or best_route is None:
+                max_delay = delay
+                best_route = r
+
+    return best_route

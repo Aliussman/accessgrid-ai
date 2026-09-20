@@ -33,14 +33,18 @@ from src.engine import (
     Network,
     add_facility_to_closure,
     closure_impact,
+    compute_point_route,
     corridor_road,
     coverage,
     facility_node_for_road,
     get_preset_edges,
+    get_primary_alternative_route,
     hospital_surge_analysis,
     intervention_outcome,
     interventions,
+    load_destinations,
     named_roads,
+    nearest_node_to_coord,
     road_edges,
     route_edge_usage,
     travel_time_bands,
@@ -59,19 +63,20 @@ app.add_middleware(
 
 # Global network load
 NET = Network.load()
-EDGE_INDEX: Dict[tuple[int, int], list[list[float]]] = {}
 
-# Pre-extract road geometries
+# Spatial index of edge geometries for fast rendering
+EDGE_INDEX: dict[tuple[int, int], list[list[float]]] = {}
 for u, v, data in NET.graph.edges(data=True):
-    coords = []
-    if data.get("geometry"):
+    if "geometry" in data and isinstance(data["geometry"], LineString):
+        coords = [[float(lat), float(lon)] for lon, lat in data["geometry"].coords]
+    elif "geometry" in data and isinstance(data["geometry"], str):
         try:
             geom = wkt.loads(data["geometry"])
-            if geom.geom_type == "LineString":
-                coords = [[float(c[1]), float(c[0])] for c in geom.coords]
+            coords = [[float(lat), float(lon)] for lon, lat in geom.coords]
         except Exception:
-            coords = []
-    if not coords:
+            a, b = NET.graph.nodes[u], NET.graph.nodes[v]
+            coords = [[float(a["y"]), float(a["x"])], [float(b["y"]), float(b["x"])]]
+    else:
         a, b = NET.graph.nodes[u], NET.graph.nodes[v]
         coords = [[float(a["y"]), float(a["x"])], [float(b["y"]), float(b["x"])]]
     key = (min(int(u), int(v)), max(int(u), int(v)))
@@ -98,6 +103,16 @@ class SimulateRequest(BaseModel):
     preset_id: Optional[str] = None
     closed_edges: Optional[List[List[int]]] = None
     threshold: float = 15.0
+    category: str = "hospital"
+
+
+class RouteRequest(BaseModel):
+    origin_lat: float
+    origin_lng: float
+    category: str = "hospital"
+    road: Optional[str] = None
+    preset_id: Optional[str] = None
+    closed_edges: Optional[List[List[int]]] = None
 
 
 class CopilotRequest(BaseModel):
@@ -120,11 +135,28 @@ class NLRequest(BaseModel):
 # Endpoints
 # --------------------------------------------------------------------------
 @app.get("/api/overview")
-def get_overview(threshold: float = Query(DEFAULT_THRESHOLD_MIN)):
+def get_overview(threshold: float = Query(DEFAULT_THRESHOLD_MIN), category: str = "all"):
     snap = coverage(NET, threshold)
     bands = travel_time_bands(NET, snap.get("node_time", {}))
 
-    # Hospitals list with coordinates
+    # Destinations list (Hospitals, Schools, Markets)
+    destinations_data = []
+    df_dest = NET.destinations if hasattr(NET, "destinations") and len(NET.destinations) > 0 else NET.hospitals
+    for _, row in df_dest.iterrows():
+        g = row.geometry
+        lon, lat = (g.x, g.y) if g.geom_type == "Point" else (g.centroid.x, g.centroid.y)
+        destinations_data.append({
+            "osm_id": str(row.get("osm_id", row["node_id"])),
+            "name": str(row["name"]),
+            "node_id": int(row["node_id"]),
+            "category": str(row.get("category", "hospital")),
+            "type": str(row.get("type", "Hospital")),
+            "capacity": int(row.get("capacity", 100)),
+            "lat": float(lat),
+            "lng": float(lon),
+        })
+
+    # Hospitals list with coordinates and service pop
     hospitals_data = []
     for h in snap["hospitals"]:
         row = NET.hospitals[NET.hospitals["osm_id"].astype(str) == str(h["osm_id"])]
@@ -136,6 +168,7 @@ def get_overview(threshold: float = Query(DEFAULT_THRESHOLD_MIN)):
             "osm_id": str(h["osm_id"]),
             "name": h["name"],
             "node_id": int(h["node_id"]),
+            "category": "hospital",
             "type": h.get("type", "Hospital"),
             "capacity": int(h.get("capacity", 100)),
             "service_pop": int(h["service_pop"]),
@@ -187,10 +220,56 @@ def get_overview(threshold: float = Query(DEFAULT_THRESHOLD_MIN)):
         "threshold": float(threshold),
         "bands": bands,
         "hospitals": hospitals_data,
+        "destinations": destinations_data,
         "isochrone_sample": nodes_sample,
         "riskiest_corridors": riskiest,
         "is_synthetic": POP_RASTER_PATH is None,
     }
+
+
+@app.get("/api/destinations")
+def get_destinations(category: str = "all"):
+    df = NET.destinations if hasattr(NET, "destinations") and len(NET.destinations) > 0 else NET.hospitals
+    if category != "all" and "category" in df.columns:
+        df = df[df["category"] == category]
+    res = []
+    for _, row in df.iterrows():
+        g = row.geometry
+        lon, lat = (g.x, g.y) if g.geom_type == "Point" else (g.centroid.x, g.centroid.y)
+        res.append({
+            "osm_id": str(row.get("osm_id", row["node_id"])),
+            "name": str(row["name"]),
+            "node_id": int(row["node_id"]),
+            "category": str(row.get("category", "hospital")),
+            "type": str(row.get("type", "Facility")),
+            "capacity": int(row.get("capacity", 100)),
+            "lat": float(lat),
+            "lng": float(lon),
+        })
+    return res
+
+
+@app.post("/api/route")
+def compute_route(req: RouteRequest):
+    orig_node = nearest_node_to_coord(NET, req.origin_lat, req.origin_lng)
+    if orig_node is None:
+        raise HTTPException(status_code=400, detail="Could not find nearest network node to coordinates.")
+
+    closed_edges = []
+    if req.preset_id and req.preset_id in DISASTER_PRESETS:
+        closed_edges = get_preset_edges(NET, req.preset_id)
+    elif req.closed_edges:
+        closed_edges = [(min(int(u), int(v)), max(int(u), int(v))) for u, v in req.closed_edges]
+    elif req.road:
+        closed_edges = road_edges(NET.graph, req.road)
+
+    result = compute_point_route(
+        net=NET,
+        origin_node=orig_node,
+        closed_edges=closed_edges,
+        category=req.category,
+    )
+    return result
 
 
 @app.get("/api/presets")
@@ -303,6 +382,9 @@ def run_simulation(req: SimulateRequest):
     # AI Briefing
     briefing = summarize_closure(impact, NET, candidates)
 
+    # Primary Alternative Detour Route calculation
+    alt_route = get_primary_alternative_route(NET, closed_edges, category=req.category)
+
     return {
         "status": "disrupted",
         "scenario": req.scenario,
@@ -323,6 +405,7 @@ def run_simulation(req: SimulateRequest):
         "boost_geometries": boost_coords,
         "facility_coord": facility_coord,
         "isochrone_sample": sample_times,
+        "alternative_route": alt_route,
     }
 
 

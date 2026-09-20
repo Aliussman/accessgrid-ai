@@ -25,6 +25,10 @@ export default function App() {
   const [presets, setPresets] = useState({});
   const [roads, setRoads] = useState([]);
   const [threshold, setThreshold] = useState(15);
+  const [destCategory, setDestCategory] = useState('all');
+  const [showAltRoute, setShowAltRoute] = useState(true);
+  const [clickedRoute, setClickedRoute] = useState(null);
+  const [originCoord, setOriginCoord] = useState(null);
   const [activeScenario, setActiveScenario] = useState(null);
   const [selectedIntervention, setSelectedIntervention] = useState(null);
   const [activeTab, setActiveTab] = useState('surge');
@@ -34,7 +38,7 @@ export default function App() {
 
   // Initial Load
   useEffect(() => {
-    fetchOverview(threshold);
+    fetchOverview(threshold, destCategory);
     fetch('/api/presets')
       .then((r) => r.json())
       .then((data) => setPresets(data))
@@ -45,9 +49,9 @@ export default function App() {
       .catch((e) => console.error('Error fetching roads:', e));
   }, []);
 
-  const fetchOverview = async (thresh) => {
+  const fetchOverview = async (thresh, cat = 'all') => {
     try {
-      const res = await fetch(`/api/overview?threshold=${thresh}`);
+      const res = await fetch(`/api/overview?threshold=${thresh}&category=${cat}`);
       const data = await res.json();
       setOverview(data);
     } catch (e) {
@@ -57,20 +61,31 @@ export default function App() {
 
   const handleThresholdChange = (val) => {
     setThreshold(val);
-    fetchOverview(val);
+    fetchOverview(val, destCategory);
     if (activeScenario) {
-      handleRunScenario({ ...activeScenario.params, threshold: val });
+      handleRunScenario({ ...activeScenario.params, threshold: val, category: destCategory });
+    }
+  };
+
+  const handleDestCategoryChange = (cat) => {
+    setDestCategory(cat);
+    fetchOverview(threshold, cat);
+    if (originCoord) {
+      // Re-calculate route for new destination category
+      handleMapClick(originCoord.lat, originCoord.lng, cat);
     }
   };
 
   const handleRunScenario = async (params) => {
     setLoading(true);
     setSelectedIntervention(null);
+    setClickedRoute(null);
+    setOriginCoord(null);
     try {
       const res = await fetch('/api/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, threshold }),
+        body: JSON.stringify({ ...params, threshold, category: destCategory }),
       });
       const data = await res.json();
       setActiveScenario({ ...data, params });
@@ -84,10 +99,46 @@ export default function App() {
     }
   };
 
+  const handleMapClick = async (lat, lng, targetCategory = destCategory) => {
+    setOriginCoord({ lat, lng });
+    try {
+      const routePayload = {
+        origin_lat: lat,
+        origin_lng: lng,
+        category: targetCategory === 'all' ? 'hospital' : targetCategory,
+      };
+
+      if (activeScenario?.params?.preset_id) {
+        routePayload.preset_id = activeScenario.params.preset_id;
+      } else if (activeScenario?.params?.road) {
+        routePayload.road = activeScenario.params.road;
+      } else if (activeScenario?.closed_edges) {
+        routePayload.closed_edges = activeScenario.closed_edges;
+      }
+
+      const res = await fetch('/api/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(routePayload),
+      });
+      const data = await res.json();
+      setClickedRoute(data);
+    } catch (err) {
+      console.error('Point routing error:', err);
+    }
+  };
+
+  const handleClearRoute = () => {
+    setClickedRoute(null);
+    setOriginCoord(null);
+  };
+
   const handleReset = () => {
     setActiveScenario(null);
     setSelectedIntervention(null);
-    fetchOverview(threshold);
+    setClickedRoute(null);
+    setOriginCoord(null);
+    fetchOverview(threshold, destCategory);
   };
 
   // Determine HUD Values
@@ -115,6 +166,8 @@ export default function App() {
     : (activeScenario?.boost_geometries || []);
 
   const facilityCoord = selectedIntervention?.facility_coord || activeScenario?.facility_coord || null;
+
+  const currentAltRoute = clickedRoute || (showAltRoute ? activeScenario?.alternative_route : null);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -159,6 +212,10 @@ export default function App() {
           roads={roads}
           threshold={threshold}
           onThresholdChange={handleThresholdChange}
+          destCategory={destCategory}
+          onDestCategoryChange={handleDestCategoryChange}
+          showAltRoute={showAltRoute}
+          setShowAltRoute={setShowAltRoute}
           onRunScenario={handleRunScenario}
           onReset={handleReset}
           loading={loading}
@@ -310,11 +367,17 @@ export default function App() {
             <MapComponent
               centre={overview?.centre}
               hospitals={overview?.hospitals || []}
+              destinations={overview?.destinations || []}
+              destCategory={destCategory}
               isochrones={isochronesData}
               closedGeoms={closedGeoms}
               boostGeoms={boostGeoms}
               riskiest={overview?.riskiest_corridors || []}
               facilityCoord={facilityCoord}
+              alternativeRoute={currentAltRoute}
+              originCoord={originCoord}
+              onMapClick={handleMapClick}
+              onClearRoute={handleClearRoute}
               showIsochrones={showIsochrones}
               showRiskiest={showRiskiest}
             />

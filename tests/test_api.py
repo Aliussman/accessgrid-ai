@@ -42,3 +42,44 @@ def test_iap_export():
     data = response.json()
     assert "report" in data
     assert "# 📋 INCIDENT ACTION PLAN" in data["report"]
+
+
+def test_destinations_endpoint():
+    response = client.get("/api/destinations?category=all")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 20
+    categories = {d.get("category") for d in data}
+    assert "hospital" in categories
+
+    # Test school filter
+    resp_schools = client.get("/api/destinations?category=school")
+    assert resp_schools.status_code == 200
+    schools_data = resp_schools.json()
+    assert len(schools_data) > 0
+    assert all(d["category"] == "school" for d in schools_data)
+
+    # Test market filter
+    resp_markets = client.get("/api/destinations?category=market")
+    assert resp_markets.status_code == 200
+    markets_data = resp_markets.json()
+    assert len(markets_data) > 0
+    assert all(d["category"] == "market" for d in markets_data)
+
+
+def test_route_endpoint():
+    response = client.post("/api/route", json={
+        "origin_lat": 30.720,
+        "origin_lng": 76.760,
+        "category": "hospital",
+        "road": "Dakshin Marg"
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "baseline_time_min" in data
+    assert "detour_time_min" in data
+    assert "baseline_route" in data
+    assert "detour_route" in data
+    assert "destination" in data
+

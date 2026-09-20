@@ -270,3 +270,25 @@ def test_hospital_surge_analysis(small_net):
     assert len(surge) == 2
     h1 = next(s for s in surge if s["name"] == "Hospital One")
     assert h1["delta_pop"] == -50
+
+
+def test_load_destinations(small_net):
+    from src.engine import load_destinations
+    df = load_destinations()
+    assert len(df) > 0
+    assert "node_id" in df.columns
+    assert "category" in df.columns
+
+
+def test_compute_point_route(small_net):
+    from src.engine import compute_point_route
+    # Route from node 5 to destination hospitals (nodes 0, 3)
+    res = compute_point_route(small_net, origin_node=5, dest_nodes=[0, 3])
+    assert res["success"] is True
+    assert res["baseline_time_min"] == 2.0
+    assert res["is_diverted"] is False
+
+    # Close edge (3, 5) -> must find alternative detour or report divergence
+    res_divert = compute_point_route(small_net, origin_node=5, dest_nodes=[0, 3], closed_edges=[(3, 5)])
+    assert res_divert["success"] is True
+    assert res_divert["is_diverted"] is True

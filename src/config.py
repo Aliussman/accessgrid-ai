@@ -11,6 +11,7 @@ DATA_DIR = ROOT / "data"
 
 GRAPHML_PATH = DATA_DIR / "city.graphml"
 HOSPITALS_PATH = DATA_DIR / "hospitals.geojson"
+DESTINATIONS_PATH = DATA_DIR / "destinations.geojson"
 POP_PATH = DATA_DIR / "pop_by_node.csv"
 CRITICALITY_PATH = DATA_DIR / "criticality.csv"
 

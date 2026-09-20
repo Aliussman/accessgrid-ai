@@ -6,6 +6,10 @@ export default function ScenarioStudio({
   roads = [],
   threshold = 15,
   onThresholdChange,
+  destCategory = 'all',
+  onDestCategoryChange,
+  showAltRoute = true,
+  setShowAltRoute,
   onRunScenario,
   onReset,
   loading = false,
@@ -74,6 +78,47 @@ export default function ScenarioStudio({
         )}
       </div>
 
+      {/* Destination Layer Category Switcher */}
+      <div>
+        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '600', marginBottom: '6px', display: 'block' }}>
+          📍 Destination Facility Layers
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px' }}>
+          {[
+            { id: 'all', label: '🌐 All POIs', badge: '50' },
+            { id: 'hospital', label: '🏥 Hospitals', badge: '21' },
+            { id: 'school', label: '🏫 Schools', badge: '15' },
+            { id: 'market', label: '🛒 Markets', badge: '14' },
+          ].map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => onDestCategoryChange && onDestCategoryChange(cat.id)}
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: '600',
+                padding: '6px 8px',
+                borderRadius: '6px',
+                border: '1px solid',
+                borderColor: destCategory === cat.id ? 'var(--accent-cyan)' : 'var(--border-subtle)',
+                background: destCategory === cat.id ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                color: destCategory === cat.id ? '#ffffff' : 'var(--text-dim)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>{cat.label}</span>
+              <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>{cat.badge}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <hr style={{ borderColor: 'var(--border-subtle)' }} />
+
       {/* Natural Language Query */}
       <form onSubmit={(e) => handleNlSubmit(e)} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -109,8 +154,9 @@ export default function ScenarioStudio({
           {[
             'Dakshin Marg closure',
             'Monsoon flood',
+            'Route to DPS School',
+            'Bypass to Sector 17 Market',
             'VIP lockdown',
-            'Green wave Jan Marg',
           ].map((chip) => (
             <button
               key={chip}
@@ -276,6 +322,15 @@ export default function ScenarioStudio({
 
         {/* Map Layers Checkboxes */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.75rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <input
+              type="checkbox"
+              checked={showAltRoute}
+              onChange={(e) => setShowAltRoute && setShowAltRoute(e.target.checked)}
+              style={{ accentColor: 'var(--accent-emerald)' }}
+            />
+            Show Alternative Detour Routes
+          </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-muted)' }}>
             <input
               type="checkbox"
