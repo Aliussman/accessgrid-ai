@@ -83,3 +83,35 @@ def test_route_endpoint():
     assert "detour_route" in data
     assert "destination" in data
 
+
+def test_resolve_nodes_endpoint():
+    # Test resolve nodes via coordinates (e.g. coordinates in Chandigarh metro)
+    response = client.post("/api/resolve-nodes", json={
+        "lat1": 30.7333,
+        "lng1": 76.7794,
+        "lat2": 30.7400,
+        "lng2": 76.7850
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert "node_a" in data
+    assert "node_b" in data
+    assert "closed_edges" in data
+    assert len(data["closed_edges"]) > 0
+    assert "coordinates" in data
+    assert data["edge_count"] > 0
+
+    # Test simulate with resolved closed_edges
+    sim_resp = client.post("/api/simulate", json={
+        "scenario": "closure",
+        "closed_edges": data["closed_edges"],
+        "threshold": 15.0
+    })
+    assert sim_resp.status_code == 200
+    sim_data = sim_resp.json()
+    assert sim_data["status"] == "disrupted"
+    assert "pop_affected" in sim_data
+    assert "surge" in sim_data
+    assert "alternative_route" in sim_data
+
+

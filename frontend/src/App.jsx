@@ -36,6 +36,13 @@ export default function App() {
   const [showRiskiest, setShowRiskiest] = useState(true);
   const [loading, setLoading] = useState(false);
 
+  // Point-to-Point Two-Node Closure States
+  const [nodeClosureMode, setNodeClosureMode] = useState(false);
+  const [pointA, setPointA] = useState(null);
+  const [pointB, setPointB] = useState(null);
+  const [nodeClosureResolved, setNodeClosureResolved] = useState(null);
+  const [isResolvingNodes, setIsResolvingNodes] = useState(false);
+
   // Initial Load
   useEffect(() => {
     fetchOverview(threshold, destCategory);
@@ -70,7 +77,7 @@ export default function App() {
   const handleDestCategoryChange = (cat) => {
     setDestCategory(cat);
     fetchOverview(threshold, cat);
-    if (originCoord) {
+    if (originCoord && !nodeClosureMode) {
       // Re-calculate route for new destination category
       handleMapClick(originCoord.lat, originCoord.lng, cat);
     }
@@ -100,6 +107,51 @@ export default function App() {
   };
 
   const handleMapClick = async (lat, lng, targetCategory = destCategory) => {
+    // If in Two-Node Closure Selection Mode
+    if (nodeClosureMode) {
+      if (!pointA) {
+        setPointA({ lat, lng });
+        setPointB(null);
+        setNodeClosureResolved(null);
+      } else if (!pointB) {
+        setPointB({ lat, lng });
+        setIsResolvingNodes(true);
+        try {
+          const res = await fetch('/api/resolve-nodes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lat1: pointA.lat,
+              lng1: pointA.lng,
+              lat2: lat,
+              lng2: lng,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setNodeClosureResolved(data);
+            setPointA((prev) => ({ ...prev, node_id: data.node_a }));
+            setPointB({ lat, lng, node_id: data.node_b });
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            alert(errData.detail || 'Could not find a connecting path between selected points. Try clicking points along a connected road.');
+            setPointB(null);
+          }
+        } catch (err) {
+          console.error('Error resolving nodes:', err);
+        } finally {
+          setIsResolvingNodes(false);
+        }
+      } else {
+        // Reset and start new selection from this point
+        setPointA({ lat, lng });
+        setPointB(null);
+        setNodeClosureResolved(null);
+      }
+      return;
+    }
+
+    // Default point-to-destination live routing mode
     setOriginCoord({ lat, lng });
     try {
       const routePayload = {
@@ -133,11 +185,28 @@ export default function App() {
     setOriginCoord(null);
   };
 
+  const handleClearNodeClosure = () => {
+    setPointA(null);
+    setPointB(null);
+    setNodeClosureResolved(null);
+  };
+
+  const handleRunNodeClosure = () => {
+    if (!nodeClosureResolved || !nodeClosureResolved.closed_edges) return;
+    handleRunScenario({
+      scenario: 'closure',
+      closed_edges: nodeClosureResolved.closed_edges,
+    });
+  };
+
   const handleReset = () => {
     setActiveScenario(null);
     setSelectedIntervention(null);
     setClickedRoute(null);
     setOriginCoord(null);
+    setPointA(null);
+    setPointB(null);
+    setNodeClosureResolved(null);
     fetchOverview(threshold, destCategory);
   };
 
@@ -224,6 +293,14 @@ export default function App() {
           setShowIsochrones={setShowIsochrones}
           showRiskiest={showRiskiest}
           setShowRiskiest={setShowRiskiest}
+          nodeClosureMode={nodeClosureMode}
+          setNodeClosureMode={setNodeClosureMode}
+          pointA={pointA}
+          pointB={pointB}
+          nodeClosureResolved={nodeClosureResolved}
+          isResolvingNodes={isResolvingNodes}
+          onClearNodeClosure={handleClearNodeClosure}
+          onRunNodeClosure={handleRunNodeClosure}
         />
 
         {/* Center Interactive Map & Floating HUD */}
@@ -376,8 +453,13 @@ export default function App() {
               facilityCoord={facilityCoord}
               alternativeRoute={currentAltRoute}
               originCoord={originCoord}
+              nodeClosureMode={nodeClosureMode}
+              pointA={pointA}
+              pointB={pointB}
+              previewClosureGeoms={nodeClosureResolved?.coordinates || []}
               onMapClick={handleMapClick}
               onClearRoute={handleClearRoute}
+              onClearNodeClosure={handleClearNodeClosure}
               showIsochrones={showIsochrones}
               showRiskiest={showRiskiest}
             />

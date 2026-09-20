@@ -292,3 +292,21 @@ def test_compute_point_route(small_net):
     res_divert = compute_point_route(small_net, origin_node=5, dest_nodes=[0, 3], closed_edges=[(3, 5)])
     assert res_divert["success"] is True
     assert res_divert["is_diverted"] is True
+
+
+def test_find_edges_between_nodes(small_net):
+    from src.engine import find_edges_between_nodes
+    # Direct edge between 1 and 2
+    edges_direct = find_edges_between_nodes(small_net, 1, 2)
+    assert edges_direct == [(1, 2)]
+
+    # Multi-hop path between 0 and 3 (0 -> 1 -> 2 -> 3)
+    edges_path = find_edges_between_nodes(small_net, 0, 3)
+    assert len(edges_path) >= 2
+    assert (0, 1) in edges_path or (1, 2) in edges_path
+
+    # Same node
+    assert find_edges_between_nodes(small_net, 1, 1) == []
+
+    # Disconnected node (node 4 is isolated)
+    assert find_edges_between_nodes(small_net, 1, 4) == []

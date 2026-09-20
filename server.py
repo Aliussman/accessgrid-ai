@@ -37,6 +37,7 @@ from src.engine import (
     corridor_road,
     coverage,
     facility_node_for_road,
+    find_edges_between_nodes,
     get_preset_edges,
     get_primary_alternative_route,
     hospital_surge_analysis,
@@ -131,9 +132,64 @@ class NLRequest(BaseModel):
     query: str
 
 
+class ResolveNodesRequest(BaseModel):
+    lat1: Optional[float] = None
+    lng1: Optional[float] = None
+    lat2: Optional[float] = None
+    lng2: Optional[float] = None
+    node1: Optional[int] = None
+    node2: Optional[int] = None
+
+
 # --------------------------------------------------------------------------
 # Endpoints
 # --------------------------------------------------------------------------
+@app.post("/api/resolve-nodes")
+def resolve_nodes_closure(req: ResolveNodesRequest):
+    """Resolve two coordinates/nodes to network nodes and find the corridor edges between them."""
+    # Resolve node 1
+    node_a = req.node1
+    if node_a is None:
+        if req.lat1 is None or req.lng1 is None:
+            raise HTTPException(status_code=400, detail="Must provide either node1 or lat1/lng1")
+        node_a = nearest_node_to_coord(NET, req.lat1, req.lng1)
+    
+    # Resolve node 2
+    node_b = req.node2
+    if node_b is None:
+        if req.lat2 is None or req.lng2 is None:
+            raise HTTPException(status_code=400, detail="Must provide either node2 or lat2/lng2")
+        node_b = nearest_node_to_coord(NET, req.lat2, req.lng2)
+
+    if node_a is None or node_b is None:
+        raise HTTPException(status_code=404, detail="Could not snap coordinates to graph nodes.")
+
+    if node_a == node_b:
+        raise HTTPException(status_code=400, detail="Selected points snapped to the same network node. Please choose points farther apart.")
+
+    edges = find_edges_between_nodes(NET, node_a, node_b)
+    if not edges:
+        raise HTTPException(status_code=404, detail="No direct or nearby path found between the selected nodes.")
+
+    geoms = []
+    for u, v in edges:
+        c = _edge_coords(u, v)
+        if c:
+            geoms.append(c)
+
+    node_a_data = NET.graph.nodes[node_a]
+    node_b_data = NET.graph.nodes[node_b]
+
+    return {
+        "node_a": int(node_a),
+        "node_b": int(node_b),
+        "node_a_coord": {"lat": float(node_a_data["y"]), "lng": float(node_a_data["x"])},
+        "node_b_coord": {"lat": float(node_b_data["y"]), "lng": float(node_b_data["x"])},
+        "closed_edges": [[int(u), int(v)] for u, v in edges],
+        "coordinates": geoms,
+        "edge_count": len(edges),
+    }
+
 @app.get("/api/overview")
 def get_overview(threshold: float = Query(DEFAULT_THRESHOLD_MIN), category: str = "all"):
     snap = coverage(NET, threshold)

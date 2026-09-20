@@ -1407,3 +1407,40 @@ def get_primary_alternative_route(
                 best_route = r
 
     return best_route
+
+
+def find_edges_between_nodes(
+    net: Network,
+    node_a: int,
+    node_b: int,
+    max_hops: int = 50,
+) -> list[tuple[int, int]]:
+    """Find all edge pairs connecting node_a and node_b.
+    
+    If direct edge exists, returns [(min(node_a, node_b), max(node_a, node_b))].
+    Otherwise, finds the shortest corridor path between node_a and node_b and
+    returns all edge pairs along that path.
+    """
+    if node_a not in net.graph or node_b not in net.graph:
+        return []
+
+    if node_a == node_b:
+        return []
+
+    # 1. Direct edge check
+    if net.graph.has_edge(node_a, node_b):
+        return [(min(node_a, node_b), max(node_a, node_b))]
+
+    # 2. Shortest path corridor search
+    try:
+        path = nx.shortest_path(net.graph, source=node_a, target=node_b, weight="travel_time")
+        if len(path) <= max_hops + 1:
+            edges = []
+            for i in range(len(path) - 1):
+                u, v = path[i], path[i + 1]
+                edges.append((min(int(u), int(v)), max(int(u), int(v))))
+            return edges
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        pass
+
+    return []

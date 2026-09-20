@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, RotateCcw, AlertTriangle, ShieldAlert, Sparkles, Navigation, Layers, Sliders } from 'lucide-react';
+import { Play, RotateCcw, AlertTriangle, ShieldAlert, Sparkles, Navigation, Layers, Sliders, Scissors, MapPin, CheckCircle2 } from 'lucide-react';
 
 export default function ScenarioStudio({
   presets = {},
@@ -18,6 +18,14 @@ export default function ScenarioStudio({
   setShowIsochrones,
   showRiskiest,
   setShowRiskiest,
+  nodeClosureMode = false,
+  setNodeClosureMode,
+  pointA = null,
+  pointB = null,
+  nodeClosureResolved = null,
+  isResolvingNodes = false,
+  onClearNodeClosure,
+  onRunNodeClosure,
 }) {
   const [scenarioType, setScenarioType] = useState('closure');
   const [selectedRoad, setSelectedRoad] = useState('');
@@ -299,6 +307,135 @@ export default function ScenarioStudio({
           <Play size={15} /> Run Simulation
         </button>
       </div>
+
+      <hr style={{ borderColor: 'var(--border-subtle)' }} />
+
+      {/* Point-to-Point Map Node Closure Feature */}
+      <div style={{
+        background: nodeClosureMode ? 'rgba(244, 63, 94, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+        border: `1px solid ${nodeClosureMode ? 'rgba(244, 63, 94, 0.35)' : 'var(--border-subtle)'}`,
+        borderRadius: '8px',
+        padding: '10px',
+        transition: 'all 0.2s ease',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <label style={{ fontSize: '0.76rem', color: nodeClosureMode ? 'var(--accent-rose)' : 'var(--text-muted)', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Scissors size={14} color={nodeClosureMode ? 'var(--accent-rose)' : 'var(--accent-cyan)'} />
+            Point-to-Point Map Closure
+          </label>
+          <button
+            type="button"
+            onClick={() => setNodeClosureMode && setNodeClosureMode(!nodeClosureMode)}
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: '600',
+              padding: '3px 8px',
+              borderRadius: '4px',
+              border: '1px solid',
+              borderColor: nodeClosureMode ? 'var(--accent-rose)' : 'var(--border-subtle)',
+              background: nodeClosureMode ? 'rgba(244, 63, 94, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+              color: nodeClosureMode ? '#ffffff' : 'var(--text-dim)',
+              cursor: 'pointer',
+            }}
+          >
+            {nodeClosureMode ? 'Active ✂️' : 'Pick on Map'}
+          </button>
+        </div>
+
+        <p style={{ fontSize: '0.7rem', color: 'var(--text-dim)', lineHeight: '1.3', marginBottom: '8px' }}>
+          Click any 2 points on the map to define custom blockade endpoints and simulate the resulting disruption.
+        </p>
+
+        {/* Selected Points Status */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '0.7rem',
+            padding: '5px 8px',
+            borderRadius: '4px',
+            background: pointA ? 'rgba(245, 158, 11, 0.12)' : 'rgba(0,0,0,0.2)',
+            border: `1px solid ${pointA ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255,255,255,0.05)'}`,
+          }}>
+            <span style={{ color: pointA ? 'var(--accent-amber)' : 'var(--text-dim)' }}>
+              🅰️ Point A: {pointA ? `${pointA.lat.toFixed(4)}, ${pointA.lng.toFixed(4)}` : 'Not Selected'}
+            </span>
+            {pointA && <span className="badge badge-amber" style={{ fontSize: '0.62rem' }}>Set</span>}
+          </div>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '0.7rem',
+            padding: '5px 8px',
+            borderRadius: '4px',
+            background: pointB ? 'rgba(244, 63, 94, 0.12)' : 'rgba(0,0,0,0.2)',
+            border: `1px solid ${pointB ? 'rgba(244, 63, 94, 0.3)' : 'rgba(255,255,255,0.05)'}`,
+          }}>
+            <span style={{ color: pointB ? 'var(--accent-rose)' : 'var(--text-dim)' }}>
+              🅱️ Point B: {pointB ? `${pointB.lat.toFixed(4)}, ${pointB.lng.toFixed(4)}` : 'Not Selected'}
+            </span>
+            {pointB && <span className="badge badge-rose" style={{ fontSize: '0.62rem' }}>Set</span>}
+          </div>
+        </div>
+
+        {/* Corridor Resolved Stats */}
+        {isResolvingNodes && (
+          <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', marginBottom: '8px', textAlign: 'center' }}>
+            Snapping to road graph & resolving corridor...
+          </div>
+        )}
+
+        {nodeClosureResolved && (
+          <div style={{
+            fontSize: '0.7rem',
+            color: 'var(--accent-emerald)',
+            background: 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            borderRadius: '4px',
+            padding: '5px 8px',
+            marginBottom: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>🛣️ Connected Corridor Found</span>
+            <span style={{ fontWeight: '700' }}>{nodeClosureResolved.edge_count} road segments</span>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{
+              flex: 1,
+              fontSize: '0.72rem',
+              padding: '6px 8px',
+              background: nodeClosureResolved ? 'var(--accent-rose)' : undefined,
+              borderColor: nodeClosureResolved ? 'var(--accent-rose)' : undefined,
+            }}
+            disabled={!nodeClosureResolved || loading}
+            onClick={onRunNodeClosure}
+          >
+            ⛔ Simulate Blockade
+          </button>
+          {(pointA || pointB || nodeClosureResolved) && (
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ fontSize: '0.72rem', padding: '6px 8px' }}
+              onClick={onClearNodeClosure}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
 
       <hr style={{ borderColor: 'var(--border-subtle)' }} />
 

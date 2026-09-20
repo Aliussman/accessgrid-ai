@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
-import { Navigation, Route, School, ShoppingBag, Hospital as HospitalIcon, X, Clock, ArrowRight } from 'lucide-react';
+import { Navigation, Route, School, ShoppingBag, Hospital as HospitalIcon, X, Clock, ArrowRight, MapPin, Scissors } from 'lucide-react';
 import L from 'leaflet';
 
 // Fix for default Leaflet icon assets
@@ -22,7 +22,7 @@ function MapUpdater({ centre }) {
   return null;
 }
 
-// Map Click Handler for Point-to-Destination live routing
+// Map Click Handler for Point-to-Destination live routing or Node Closure selection
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
     click(e) {
@@ -46,8 +46,13 @@ export default function MapComponent({
   facilityCoord = null,
   alternativeRoute = null,
   originCoord = null,
+  nodeClosureMode = false,
+  pointA = null,
+  pointB = null,
+  previewClosureGeoms = [],
   onMapClick = null,
   onClearRoute = null,
+  onClearNodeClosure = null,
   showIsochrones = true,
   showRiskiest = true,
 }) {
@@ -259,6 +264,61 @@ export default function MapComponent({
           </CircleMarker>
         )}
 
+        {/* Point-to-Point Two-Node Closure Preview Corridor */}
+        {previewClosureGeoms && previewClosureGeoms.length > 0 &&
+          previewClosureGeoms.map((coords, idx) => (
+            <Polyline
+              key={`preview-cut-${idx}`}
+              positions={coords}
+              pathOptions={{
+                color: '#f43f5e',
+                weight: 7,
+                opacity: 0.9,
+                dashArray: '8, 6',
+              }}
+            >
+              <Tooltip sticky>
+                <span style={{ color: '#f43f5e', fontWeight: 'bold' }}>✂️ Proposed Road Closure Corridor</span>
+              </Tooltip>
+            </Polyline>
+          ))}
+
+        {/* Node Closure Selection Point A (Start) */}
+        {pointA && (
+          <CircleMarker
+            center={[pointA.lat, pointA.lng]}
+            radius={9}
+            pathOptions={{
+              fillColor: '#f59e0b',
+              color: '#ffffff',
+              weight: 3,
+              fillOpacity: 1.0,
+            }}
+          >
+            <Tooltip permanent direction="top" offset={[0, -10]}>
+              <span style={{ fontWeight: 'bold', color: '#b45309' }}>🅰️ Point A {pointA.node_id ? `(#${pointA.node_id})` : ''}</span>
+            </Tooltip>
+          </CircleMarker>
+        )}
+
+        {/* Node Closure Selection Point B (End) */}
+        {pointB && (
+          <CircleMarker
+            center={[pointB.lat, pointB.lng]}
+            radius={9}
+            pathOptions={{
+              fillColor: '#ef4444',
+              color: '#ffffff',
+              weight: 3,
+              fillOpacity: 1.0,
+            }}
+          >
+            <Tooltip permanent direction="top" offset={[0, -10]}>
+              <span style={{ fontWeight: 'bold', color: '#b91c1c' }}>🅱️ Point B {pointB.node_id ? `(#${pointB.node_id})` : ''}</span>
+            </Tooltip>
+          </CircleMarker>
+        )}
+
         {/* Multi-Category Destinations (Hospitals, Schools, Markets) */}
         {filteredDestinations.map((d, idx) => {
           const theme = getCategoryTheme(d.category);
@@ -302,6 +362,64 @@ export default function MapComponent({
           );
         })}
       </MapContainer>
+
+      {/* Point-to-Point Node Selection Banner Indicator */}
+      {nodeClosureMode && (
+        <div style={{
+          position: 'absolute',
+          top: '16px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          background: 'rgba(15, 23, 42, 0.95)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(244, 63, 94, 0.6)',
+          borderRadius: '10px',
+          padding: '10px 18px',
+          boxShadow: '0 8px 32px rgba(244, 63, 94, 0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          color: '#ffffff',
+          pointerEvents: 'auto',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Scissors size={18} color="var(--accent-rose)" className="animate-pulse" />
+            <span style={{ fontSize: '0.82rem', fontWeight: '700' }}>
+              {!pointA ? 'Step 1: Click map to place Point 🅰️ (Start Cut)' : (!pointB ? 'Step 2: Click map to place Point 🅱️ (End Cut)' : 'Corridor Selected! Ready to Simulate')}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {pointA && (
+              <span className="badge badge-amber" style={{ fontSize: '0.7rem' }}>
+                🅰️ Point A Set
+              </span>
+            )}
+            {pointB && (
+              <span className="badge badge-rose" style={{ fontSize: '0.7rem' }}>
+                🅱️ Point B Set
+              </span>
+            )}
+            {onClearNodeClosure && (pointA || pointB) && (
+              <button
+                onClick={onClearNodeClosure}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: '#ffffff',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '0.7rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Clear Points
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Interactive Alternative Route Card Overlay */}
       {alternativeRoute && alternativeRoute.success && (
