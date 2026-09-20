@@ -309,55 +309,55 @@ export default function App() {
           <div className="floating-hud">
             <div className="hud-card">
               <div className="hud-label">
-                <Clock size={14} color={isDisrupted ? 'var(--accent-rose)' : 'var(--accent-cyan)'} />
-                {isDisrupted ? 'Avg Zone Delay' : 'Avg Access Time'}
+                <Clock size={13} color={isDisrupted ? 'var(--accent-rose)' : 'var(--accent-cyan)'} />
+                {isDisrupted ? 'Average Delay' : 'Avg Access Time'}
               </div>
-              <div className="hud-value" style={{ color: isDisrupted ? '#f87171' : '#ffffff' }}>
+              <div className="hud-value" style={{ color: isDisrupted ? '#f87171' : '#ffffff', fontSize: '1.25rem' }}>
                 {isDisrupted
                   ? `+${(activeScenario?.per_capita_debt_min || timeDelta).toFixed(1)} min`
                   : `${avgTime?.toFixed(1)} min`}
               </div>
-              {isDisrupted ? (
-                <div className="hud-delta danger">
-                  {activeScenario?.pop_affected?.toLocaleString()} affected (City: {avgTime?.toFixed(1)}m)
-                </div>
-              ) : (
-                <div className="hud-delta success">Optimal Baseline Coverage</div>
-              )}
-            </div>
-
-            <div className="hud-card">
-              <div className="hud-label">
-                <Zap size={14} color="var(--accent-amber)" />
-                Accessibility Debt
-              </div>
-              <div className="hud-value">{debt ? debt.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '0'}</div>
-              <div className="hud-delta warn">
-                {isDisrupted ? `${activeScenario?.per_capita_debt_min?.toFixed(1)}m / person` : '0 pop-minutes'}
+              <div className={`hud-delta ${isDisrupted ? 'danger' : 'success'}`} style={{ fontSize: '0.7rem' }}>
+                {isDisrupted ? `City baseline: ${activeScenario?.avg_access_before?.toFixed(1)}m` : 'Normal City Flow'}
               </div>
             </div>
 
             <div className="hud-card">
               <div className="hud-label">
-                <CheckCircle2 size={14} color="var(--accent-emerald)" />
-                In-Threshold Pop
+                <Zap size={13} color="var(--accent-amber)" />
+                {isDisrupted ? 'People Delayed' : 'Accessibility Impact'}
               </div>
-              <div className="hud-value">{coveredPop?.toLocaleString()}</div>
-              <div className="hud-delta success">
-                {totalPop ? ((coveredPop / totalPop) * 100).toFixed(1) : 0}% of metro
+              <div className="hud-value" style={{ fontSize: '1.25rem' }}>
+                {isDisrupted ? (activeScenario?.pop_affected?.toLocaleString() || '0') : 'Optimal'}
+              </div>
+              <div className="hud-delta warn" style={{ fontSize: '0.7rem' }}>
+                {isDisrupted ? `${activeScenario?.per_capita_debt_min?.toFixed(1)}m delay / resident` : '0 delays'}
               </div>
             </div>
 
             <div className="hud-card">
               <div className="hud-label">
-                <ShieldAlert size={14} color="var(--accent-rose)" />
-                Lost Access
+                <CheckCircle2 size={13} color="var(--accent-emerald)" />
+                Within 15m Window
               </div>
-              <div className="hud-value" style={{ color: lostPop > 0 ? '#f87171' : '#ffffff' }}>
+              <div className="hud-value" style={{ fontSize: '1.25rem' }}>
+                {totalPop ? ((coveredPop / totalPop) * 100).toFixed(1) : 0}%
+              </div>
+              <div className="hud-delta success" style={{ fontSize: '0.7rem' }}>
+                {coveredPop?.toLocaleString()} residents safe
+              </div>
+            </div>
+
+            <div className="hud-card">
+              <div className="hud-label">
+                <ShieldAlert size={13} color="var(--accent-rose)" />
+                Severe Cutoffs
+              </div>
+              <div className="hud-value" style={{ color: lostPop > 0 ? '#f87171' : '#ffffff', fontSize: '1.25rem' }}>
                 {lostPop ? lostPop.toLocaleString() : '0'}
               </div>
-              <div className={`hud-delta ${lostPop > 0 ? 'danger' : 'success'}`}>
-                {lostPop > 0 ? 'Severe Care Cutoff' : 'Full In-Budget Coverage'}
+              <div className={`hud-delta ${lostPop > 0 ? 'danger' : 'success'}`} style={{ fontSize: '0.7rem' }}>
+                {lostPop > 0 ? 'Lost Critical Care' : 'All Facilities Reachable'}
               </div>
             </div>
           </div>
