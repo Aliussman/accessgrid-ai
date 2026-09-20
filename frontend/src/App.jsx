@@ -303,10 +303,10 @@ export default function App() {
           onRunNodeClosure={handleRunNodeClosure}
         />
 
-        {/* Center Interactive Map & Floating HUD */}
+        {/* Center Interactive Map & Telemetry Bar */}
         <div className="map-canvas-container">
-          {/* Floating HUD */}
-          <div className="floating-hud">
+          {/* Dedicated Non-Overlapping Telemetry Bar */}
+          <div className="map-telemetry-bar">
             <div className="hud-card">
               <div className="hud-label">
                 <Clock size={13} color={isDisrupted ? 'var(--accent-rose)' : 'var(--accent-cyan)'} />

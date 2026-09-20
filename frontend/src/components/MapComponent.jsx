@@ -363,42 +363,42 @@ export default function MapComponent({
         })}
       </MapContainer>
 
-      {/* Point-to-Point Node Selection Banner Indicator */}
+      {/* Point-to-Point Node Selection Floating Action Pill (Bottom Center) */}
       {nodeClosureMode && (
         <div style={{
           position: 'absolute',
-          top: '16px',
+          bottom: '20px',
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.95)',
-          backdropFilter: 'blur(10px)',
+          background: 'rgba(15, 23, 42, 0.96)',
+          backdropFilter: 'blur(12px)',
           border: '1px solid rgba(244, 63, 94, 0.6)',
-          borderRadius: '10px',
-          padding: '10px 18px',
-          boxShadow: '0 8px 32px rgba(244, 63, 94, 0.25)',
+          borderRadius: '24px',
+          padding: '8px 18px',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.7)',
           display: 'flex',
           alignItems: 'center',
-          gap: '14px',
+          gap: '12px',
           color: '#ffffff',
           pointerEvents: 'auto',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Scissors size={18} color="var(--accent-rose)" className="animate-pulse" />
-            <span style={{ fontSize: '0.82rem', fontWeight: '700' }}>
-              {!pointA ? 'Step 1: Click map to place Point 🅰️ (Start Cut)' : (!pointB ? 'Step 2: Click map to place Point 🅱️ (End Cut)' : 'Corridor Selected! Ready to Simulate')}
+            <Scissors size={16} color="var(--accent-rose)" className="animate-pulse" />
+            <span style={{ fontSize: '0.78rem', fontWeight: '700' }}>
+              {!pointA ? 'Click map for Point 🅰️' : (!pointB ? 'Click map for Point 🅱️' : 'Corridor Ready to Block')}
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {pointA && (
-              <span className="badge badge-amber" style={{ fontSize: '0.7rem' }}>
-                🅰️ Point A Set
+              <span className="badge badge-amber" style={{ fontSize: '0.65rem' }}>
+                🅰️ Set
               </span>
             )}
             {pointB && (
-              <span className="badge badge-rose" style={{ fontSize: '0.7rem' }}>
-                🅱️ Point B Set
+              <span className="badge badge-rose" style={{ fontSize: '0.65rem' }}>
+                🅱️ Set
               </span>
             )}
             {onClearNodeClosure && (pointA || pointB) && (
@@ -408,40 +408,40 @@ export default function MapComponent({
                   background: 'rgba(255, 255, 255, 0.1)',
                   border: '1px solid rgba(255, 255, 255, 0.2)',
                   color: '#ffffff',
-                  borderRadius: '4px',
+                  borderRadius: '12px',
                   padding: '2px 8px',
-                  fontSize: '0.7rem',
+                  fontSize: '0.65rem',
                   cursor: 'pointer',
                 }}
               >
-                Clear Points
+                Reset
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* Interactive Alternative Route Card Overlay */}
+      {/* Interactive Alternative Route Card Overlay (Bottom Right) */}
       {alternativeRoute && alternativeRoute.success && (
         <div style={{
           position: 'absolute',
-          top: '16px',
+          bottom: '20px',
           right: '16px',
           zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.92)',
-          backdropFilter: 'blur(8px)',
+          background: 'rgba(15, 23, 42, 0.94)',
+          backdropFilter: 'blur(12px)',
           border: '1px solid rgba(16, 185, 129, 0.4)',
           borderRadius: '10px',
-          padding: '12px 14px',
-          maxWidth: '320px',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+          padding: '10px 14px',
+          maxWidth: '300px',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
           color: '#f8fafc',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Route size={16} color="var(--accent-emerald)" />
-              <span style={{ fontSize: '0.82rem', fontWeight: '700', color: 'var(--accent-emerald)' }}>
-                {alternativeRoute.is_diverted ? 'Alternative Detour Route' : 'Direct Emergency Route'}
+              <Route size={15} color="var(--accent-emerald)" />
+              <span style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--accent-emerald)' }}>
+                {alternativeRoute.is_diverted ? 'Alternative Detour Route' : 'Direct Route'}
               </span>
             </div>
             {onClearRoute && (
@@ -455,39 +455,35 @@ export default function MapComponent({
             )}
           </div>
 
-          <div style={{ fontSize: '0.74rem', color: '#cbd5e1', marginBottom: '8px' }}>
+          <div style={{ fontSize: '0.72rem', color: '#cbd5e1', marginBottom: '6px' }}>
             To: <strong>{alternativeRoute.destination?.name || 'Nearest Facility'}</strong>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', background: 'rgba(0, 0, 0, 0.3)', padding: '6px 10px', borderRadius: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', background: 'rgba(0, 0, 0, 0.3)', padding: '5px 8px', borderRadius: '6px' }}>
             <div>
-              <div style={{ fontSize: '0.66rem', color: '#94a3b8' }}>Normal Time</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#94a3b8' }}>
+              <div style={{ fontSize: '0.62rem', color: '#94a3b8' }}>Normal</div>
+              <div style={{ fontSize: '0.8rem', fontWeight: '700', color: '#94a3b8' }}>
                 {alternativeRoute.baseline_time_min ? `${alternativeRoute.baseline_time_min.toFixed(1)}m` : 'N/A'}
               </div>
             </div>
 
-            <ArrowRight size={14} color="#64748b" />
+            <ArrowRight size={12} color="#64748b" />
 
             <div>
-              <div style={{ fontSize: '0.66rem', color: 'var(--accent-emerald)' }}>Detour Time</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--accent-emerald)' }}>
+              <div style={{ fontSize: '0.62rem', color: 'var(--accent-emerald)' }}>Detour</div>
+              <div style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--accent-emerald)' }}>
                 {alternativeRoute.detour_time_min ? `${alternativeRoute.detour_time_min.toFixed(1)}m` : 'N/A'}
               </div>
             </div>
 
             <div>
-              <div style={{ fontSize: '0.66rem', color: alternativeRoute.delay_min > 0 ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
+              <div style={{ fontSize: '0.62rem', color: alternativeRoute.delay_min > 0 ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
                 Delay
               </div>
-              <div style={{ fontSize: '0.85rem', fontWeight: '700', color: alternativeRoute.delay_min > 0 ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: '700', color: alternativeRoute.delay_min > 0 ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
                 {alternativeRoute.delay_min > 0 ? `+${alternativeRoute.delay_min.toFixed(1)}m` : '0m'}
               </div>
             </div>
-          </div>
-
-          <div style={{ fontSize: '0.66rem', color: '#94a3b8', marginTop: '6px', textAlign: 'center' }}>
-            💡 Click anywhere on the map to calculate live detour routes from that location.
           </div>
         </div>
       )}
