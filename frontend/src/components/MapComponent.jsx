@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
-import { Navigation, Route, School, ShoppingBag, Hospital as HospitalIcon, X, Clock, ArrowRight, MapPin, Scissors } from 'lucide-react';
+import { Navigation, Route, School, ShoppingBag, Hospital as HospitalIcon, X, Clock, ArrowRight, MapPin, Scissors, Link2 } from 'lucide-react';
 import L from 'leaflet';
 
 // Fix for default Leaflet icon assets
@@ -47,9 +47,13 @@ export default function MapComponent({
   alternativeRoute = null,
   originCoord = null,
   nodeClosureMode = false,
+  customToolMode = 'cut',
   pointA = null,
   pointB = null,
   previewClosureGeoms = [],
+  previewLinkCoords = [],
+  simulatedLinkCoords = [],
+  addedLinkInfo = null,
   onMapClick = null,
   onClearRoute = null,
   onClearNodeClosure = null,
@@ -283,38 +287,138 @@ export default function MapComponent({
             </Polyline>
           ))}
 
-        {/* Node Closure Selection Point A (Start) */}
+        {/* Normal Detour Route for Link Comparison (Amber Dashed) */}
+        {addedLinkInfo?.route_comparison?.normal_route_coords && addedLinkInfo.route_comparison.normal_route_coords.length > 0 && (
+          <Polyline
+            positions={addedLinkInfo.route_comparison.normal_route_coords}
+            pathOptions={{
+              color: '#f59e0b',
+              weight: 4,
+              opacity: 0.8,
+              dashArray: '6, 6',
+            }}
+          >
+            <Tooltip sticky>
+              <div style={{ color: '#070a13' }}>
+                <strong style={{ color: '#d97706' }}>🚗 Normal Route Detour</strong>
+                <br />
+                Travel Time: {addedLinkInfo.route_comparison.normal_travel_time_min?.toFixed(1)} min
+                <br />
+                Distance: {addedLinkInfo.route_comparison.normal_distance_km?.toFixed(2)} km
+              </div>
+            </Tooltip>
+          </Polyline>
+        )}
+
+        {/* Point-to-Point Temporary Link Connector Preview (Dashed Glowing Violet) */}
+        {previewLinkCoords && previewLinkCoords.length > 0 && (
+          <Polyline
+            positions={previewLinkCoords}
+            pathOptions={{
+              color: '#a855f7',
+              weight: 6,
+              opacity: 0.95,
+              dashArray: '10, 6',
+            }}
+          >
+            <Tooltip sticky>
+              <div style={{ color: '#070a13' }}>
+                <strong style={{ color: '#7c3aed' }}>🔗 Proposed Temporary Link Connector</strong>
+                <br />
+                Connector: {addedLinkInfo?.travel_time_min?.toFixed(1)} min ({addedLinkInfo?.distance_m < 1000 ? `${addedLinkInfo?.distance_m?.toFixed(0)} m` : `${addedLinkInfo?.distance_km?.toFixed(2)} km`} @ {addedLinkInfo?.speed_kmh} km/h)
+                {addedLinkInfo?.route_comparison?.has_normal_route && (
+                  <>
+                    <br />
+                    <span style={{ color: '#059669', fontWeight: 'bold' }}>
+                      ⚡ Saves {addedLinkInfo.route_comparison.time_saved_min?.toFixed(1)} min vs {addedLinkInfo.route_comparison.normal_travel_time_min?.toFixed(1)} min normal route ({addedLinkInfo.route_comparison.pct_faster?.toFixed(0)}% faster)
+                    </span>
+                  </>
+                )}
+              </div>
+            </Tooltip>
+          </Polyline>
+        )}
+
+        {/* Active Simulated Temporary Link (Solid Glowing Violet) */}
+        {simulatedLinkCoords && simulatedLinkCoords.length > 0 && (
+          <Polyline
+            positions={simulatedLinkCoords}
+            pathOptions={{
+              color: '#c084fc',
+              weight: 7,
+              opacity: 0.95,
+            }}
+          >
+            <Tooltip sticky>
+              <div style={{ color: '#070a13' }}>
+                <strong style={{ color: '#7c3aed' }}>🔗 Active Temporary Connector Link</strong>
+                <br />
+                Connector: {addedLinkInfo?.travel_time_min?.toFixed(1)} min ({addedLinkInfo?.length_km ? `${addedLinkInfo.length_km.toFixed(2)} km` : `${addedLinkInfo?.distance_km?.toFixed(2)} km`} @ {addedLinkInfo?.speed_kmh || 30} km/h)
+                {addedLinkInfo?.route_comparison?.has_normal_route && (
+                  <>
+                    <br />
+                    <span style={{ color: '#059669', fontWeight: 'bold' }}>
+                      ⚡ Direct Route: -{addedLinkInfo.route_comparison.time_saved_min?.toFixed(1)} min saved ({addedLinkInfo.route_comparison.pct_faster?.toFixed(0)}% faster)
+                    </span>
+                  </>
+                )}
+                {addedLinkInfo?.destination_impact?.avg_dest_time_saved_min > 0 && (
+                  <>
+                    <br />
+                    <span style={{ color: '#2563eb', fontWeight: 'bold' }}>
+                      🏥 Hospital Access: -{addedLinkInfo.destination_impact.avg_dest_time_saved_min.toFixed(1)} min avg improvement ({addedLinkInfo.destination_impact.pop_improved_time?.toLocaleString()} residents)
+                    </span>
+                  </>
+                )}
+                {addedLinkInfo?.debt_reduced_pop_min > 0 && (
+                  <>
+                    <br />
+                    <span style={{ color: '#059669', fontWeight: 'bold' }}>
+                      📉 Debt Reduced: -{Math.round(addedLinkInfo.debt_reduced_pop_min).toLocaleString()} pop-min
+                    </span>
+                  </>
+                )}
+              </div>
+            </Tooltip>
+          </Polyline>
+        )}
+
+        {/* Node Selection Point A (Start) */}
         {pointA && (
           <CircleMarker
             center={[pointA.lat, pointA.lng]}
             radius={9}
             pathOptions={{
-              fillColor: '#f59e0b',
+              fillColor: customToolMode === 'link' ? '#a855f7' : '#f59e0b',
               color: '#ffffff',
               weight: 3,
               fillOpacity: 1.0,
             }}
           >
             <Tooltip permanent direction="top" offset={[0, -10]}>
-              <span style={{ fontWeight: 'bold', color: '#b45309' }}>🅰️ Point A {pointA.node_id ? `(#${pointA.node_id})` : ''}</span>
+              <span style={{ fontWeight: 'bold', color: customToolMode === 'link' ? '#7c3aed' : '#b45309' }}>
+                🅰️ Point A {pointA.node_id ? `(#${pointA.node_id})` : ''}
+              </span>
             </Tooltip>
           </CircleMarker>
         )}
 
-        {/* Node Closure Selection Point B (End) */}
+        {/* Node Selection Point B (End) */}
         {pointB && (
           <CircleMarker
             center={[pointB.lat, pointB.lng]}
             radius={9}
             pathOptions={{
-              fillColor: '#ef4444',
+              fillColor: customToolMode === 'link' ? '#c084fc' : '#ef4444',
               color: '#ffffff',
               weight: 3,
               fillOpacity: 1.0,
             }}
           >
             <Tooltip permanent direction="top" offset={[0, -10]}>
-              <span style={{ fontWeight: 'bold', color: '#b91c1c' }}>🅱️ Point B {pointB.node_id ? `(#${pointB.node_id})` : ''}</span>
+              <span style={{ fontWeight: 'bold', color: customToolMode === 'link' ? '#9333ea' : '#b91c1c' }}>
+                🅱️ Point B {pointB.node_id ? `(#${pointB.node_id})` : ''}
+              </span>
             </Tooltip>
           </CircleMarker>
         )}
@@ -373,7 +477,7 @@ export default function MapComponent({
           zIndex: 1000,
           background: 'rgba(15, 23, 42, 0.96)',
           backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(244, 63, 94, 0.6)',
+          border: `1px solid ${customToolMode === 'link' ? 'rgba(168, 85, 247, 0.7)' : 'rgba(244, 63, 94, 0.6)'}`,
           borderRadius: '24px',
           padding: '8px 18px',
           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.7)',
@@ -384,20 +488,28 @@ export default function MapComponent({
           pointerEvents: 'auto',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Scissors size={16} color="var(--accent-rose)" className="animate-pulse" />
+            {customToolMode === 'link' ? (
+              <Link2 size={16} color="#c084fc" className="animate-pulse" />
+            ) : (
+              <Scissors size={16} color="var(--accent-rose)" className="animate-pulse" />
+            )}
             <span style={{ fontSize: '0.78rem', fontWeight: '700' }}>
-              {!pointA ? 'Click map for Point 🅰️' : (!pointB ? 'Click map for Point 🅱️' : 'Corridor Ready to Block')}
+              {!pointA
+                ? `Click map for ${customToolMode === 'link' ? 'Link Point' : 'Point'} 🅰️`
+                : (!pointB
+                ? `Click map for ${customToolMode === 'link' ? 'Link Point' : 'Point'} 🅱️`
+                : (customToolMode === 'link' ? 'Temporary Link Ready' : 'Corridor Ready to Block'))}
             </span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {pointA && (
-              <span className="badge badge-amber" style={{ fontSize: '0.65rem' }}>
+              <span className={`badge ${customToolMode === 'link' ? 'badge-cyan' : 'badge-amber'}`} style={{ fontSize: '0.65rem' }}>
                 🅰️ Set
               </span>
             )}
             {pointB && (
-              <span className="badge badge-rose" style={{ fontSize: '0.65rem' }}>
+              <span className={`badge ${customToolMode === 'link' ? 'badge-emerald' : 'badge-rose'}`} style={{ fontSize: '0.65rem' }}>
                 🅱️ Set
               </span>
             )}

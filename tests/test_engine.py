@@ -311,3 +311,99 @@ def test_find_edges_between_nodes(small_net):
 
     # Disconnected node (node 4 is isolated)
     assert find_edges_between_nodes(small_net, 1, 4) == []
+
+
+def test_haversine_distance():
+    from src.engine import haversine_distance
+    # Chandigarh Sector 17 to Sector 35 (~2.3 km)
+    dist = haversine_distance(30.7400, 76.7800, 30.7200, 76.7700)
+    assert 2000 < dist < 3000
+    # Same point
+    assert haversine_distance(30.74, 76.78, 30.74, 76.78) == 0.0
+
+
+def test_evaluate_link_addition_standalone(small_net):
+    from src.engine import evaluate_link_addition
+    # Connect isolated node 4 to node 3 with a 30 km/h link
+    original_edge_count = small_net.graph.number_of_edges()
+    res = evaluate_link_addition(small_net, node_a=4, node_b=3, speed_kmh=30.0, threshold=10.0)
+    
+    assert res["node_a"] == 4 and res["node_b"] == 3
+    assert res["speed_kmh"] == 30.0
+    assert res["length_m"] > 0
+    assert res["travel_time_min"] > 0
+    # Node 4 now gains hospital access (pop 100 gained!)
+    assert res["new_covered_pop"] == 100
+    assert res["pop_restored"] == 100
+    # Ensure network graph was NOT mutated in memory
+    assert small_net.graph.number_of_edges() == original_edge_count
+    assert not small_net.graph.has_edge(4, 3)
+
+
+def test_evaluate_link_addition_on_closure(small_net):
+    from src.engine import evaluate_link_addition
+    # Close main artery (1, 2) and (2, 3), and add connector link between 1 and 3 at 45 km/h
+    res = evaluate_link_addition(
+        small_net,
+        node_a=1,
+        node_b=3,
+        speed_kmh=45.0,
+        closed_edges=[(1, 2), (2, 3)],
+        threshold=10.0,
+    )
+    assert res["debt_without_link_pop_min"] > 0
+    assert "debt_reduced_pop_min" in res
+    assert res["link_geometry"] is not None
+
+
+def test_evaluate_link_addition_rejections(small_net):
+    from src.engine import evaluate_link_addition
+    # Same node rejection
+    with pytest.raises(ValueError, match="same network node"):
+        evaluate_link_addition(small_net, node_a=1, node_b=1)
+
+    # 3 km limit rejection: create dummy nodes far apart
+    small_net.graph.nodes[0]["y"] = 30.0000
+    small_net.graph.nodes[0]["x"] = 76.0000
+    small_net.graph.nodes[1]["y"] = 30.1000  # ~11 km away
+    small_net.graph.nodes[1]["x"] = 76.0000
+    with pytest.raises(ValueError, match="exceeds 3 km limit"):
+        evaluate_link_addition(small_net, node_a=0, node_b=1)
+    
+    # Restore node coords
+    small_net.graph.nodes[0]["y"] = 30.7300
+    small_net.graph.nodes[0]["x"] = 76.7800
+    small_net.graph.nodes[1]["y"] = 30.7350
+    small_net.graph.nodes[1]["x"] = 76.7850
+
+
+def test_compute_route_comparison(small_net):
+    from src.engine import compute_route_comparison
+    # Direct edge between 1 and 3 has travel_time = 8.0 min
+    comp = compute_route_comparison(
+        net=small_net,
+        node_a=1,
+        node_b=3,
+        link_dist_m=600.0,
+        link_travel_time_min=1.2,
+    )
+    assert comp["has_normal_route"] is True
+    assert comp["normal_travel_time_min"] == 8.0
+    assert comp["link_travel_time_min"] == 1.2
+    assert comp["time_saved_min"] == 6.8
+    assert comp["pct_faster"] > 70.0
+    assert len(comp["normal_route_coords"]) == 2
+
+    # Now close the direct link (1, 3) so normal route detours via 1 -> 2 -> 3 (travel time = 4.0 + 5.0 = 9.0 min)
+    comp_detour = compute_route_comparison(
+        net=small_net,
+        node_a=1,
+        node_b=3,
+        link_dist_m=600.0,
+        link_travel_time_min=1.2,
+        closed_edges=[(1, 3)],
+    )
+    assert comp_detour["has_normal_route"] is True
+    assert comp_detour["normal_travel_time_min"] == 9.0
+    assert comp_detour["time_saved_min"] == 7.8
+    assert len(comp_detour["normal_route_coords"]) == 3

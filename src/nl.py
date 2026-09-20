@@ -103,7 +103,8 @@ def parse_scenario(query: str, net: Network) -> dict:
     if any(w in lower for w in _RESET_WORDS) and not any(w in lower for w in ("close", "block", "shut", "flood", "hazard")):
         if any(w in lower for w in ("coverage", "overview", "baseline")):
             return {"action": "coverage", "question": q}
-        return {"action": "reopen", "road": None, "question": q}
+        road = _match_road(q, net)
+        return {"action": "reopen", "road": road, "question": q}
 
     # 2. Check for Disaster Preset triggers
     for pid, keywords in _PRESET_KEYWORDS.items():

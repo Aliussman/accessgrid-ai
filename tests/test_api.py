@@ -115,3 +115,67 @@ def test_resolve_nodes_endpoint():
     assert "alternative_route" in sim_data
 
 
+def test_resolve_link_endpoint():
+    # Test resolve link connector via coordinates in Chandigarh metro (~1 km)
+    response = client.post("/api/resolve-link", json={
+        "lat1": 30.7333,
+        "lng1": 76.7794,
+        "lat2": 30.7400,
+        "lng2": 76.7850,
+        "speed_kmh": 30.0,
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert "node_a" in data
+    assert "node_b" in data
+    assert "distance_m" in data
+    assert data["distance_m"] <= 3000.0
+    assert "travel_time_min" in data
+    assert data["speed_kmh"] == 30.0
+    assert len(data["coordinates"]) == 2
+    assert "route_comparison" in data
+
+    # Test simulate with added link
+    sim_resp = client.post("/api/simulate", json={
+        "scenario": "link",
+        "added_link": {
+            "node_a": data["node_a"],
+            "node_b": data["node_b"],
+            "speed_kmh": 30.0,
+        },
+        "threshold": 15.0
+    })
+    assert sim_resp.status_code == 200
+    sim_data = sim_resp.json()
+    assert sim_data["status"] == "disrupted"
+    assert "added_link_info" in sim_data
+    assert sim_data["added_link_info"]["node_a"] == data["node_a"]
+    assert "route_comparison" in sim_data["added_link_info"]
+    assert "destination_impact" in sim_data["added_link_info"]
+    assert "added_link_geometry" in sim_data
+    assert len(sim_data["added_link_geometry"]) == 2
+
+
+def test_resolve_link_validation_errors():
+    # 1. Reject if points are too far apart (> 3 km)
+    response = client.post("/api/resolve-link", json={
+        "lat1": 30.7000,
+        "lng1": 76.7000,
+        "lat2": 30.8000,
+        "lng2": 76.8000,
+        "speed_kmh": 30.0,
+    })
+    assert response.status_code == 400
+    assert "3 km limit" in response.json()["detail"]
+
+    # 2. Reject if points snap to the exact same node
+    response_same = client.post("/api/resolve-link", json={
+        "lat1": 30.7333,
+        "lng1": 76.7794,
+        "lat2": 30.7333,
+        "lng2": 76.7794,
+    })
+    assert response_same.status_code == 400
+    assert "same network node" in response_same.json()["detail"]
+
+

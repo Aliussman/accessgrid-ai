@@ -36,12 +36,16 @@ export default function App() {
   const [showRiskiest, setShowRiskiest] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // Point-to-Point Two-Node Closure States
+  // Point-to-Point Two-Node Closure & Link States
   const [nodeClosureMode, setNodeClosureMode] = useState(false);
+  const [customToolMode, setCustomToolMode] = useState('cut'); // 'cut' | 'link'
+  const [linkSpeed, setLinkSpeed] = useState(30);
   const [pointA, setPointA] = useState(null);
   const [pointB, setPointB] = useState(null);
   const [nodeClosureResolved, setNodeClosureResolved] = useState(null);
   const [isResolvingNodes, setIsResolvingNodes] = useState(false);
+  const [addedLinkResolved, setAddedLinkResolved] = useState(null);
+  const [isResolvingLink, setIsResolvingLink] = useState(false);
 
   // Initial Load
   useEffect(() => {
@@ -107,46 +111,89 @@ export default function App() {
   };
 
   const handleMapClick = async (lat, lng, targetCategory = destCategory) => {
-    // If in Two-Node Closure Selection Mode
+    // If in Two-Node Map Selection Mode (Cut or Add Link)
     if (nodeClosureMode) {
       if (!pointA) {
         setPointA({ lat, lng });
         setPointB(null);
         setNodeClosureResolved(null);
+        setAddedLinkResolved(null);
       } else if (!pointB) {
         setPointB({ lat, lng });
-        setIsResolvingNodes(true);
-        try {
-          const res = await fetch('/api/resolve-nodes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        if (customToolMode === 'link') {
+          setIsResolvingLink(true);
+          try {
+            const resolvePayload = {
               lat1: pointA.lat,
               lng1: pointA.lng,
               lat2: lat,
               lng2: lng,
-            }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            setNodeClosureResolved(data);
-            setPointA((prev) => ({ ...prev, node_id: data.node_a }));
-            setPointB({ lat, lng, node_id: data.node_b });
-          } else {
-            const errData = await res.json().catch(() => ({}));
-            alert(errData.detail || 'Could not find a connecting path between selected points. Try clicking points along a connected road.');
-            setPointB(null);
+              speed_kmh: linkSpeed,
+            };
+            if (activeScenario?.params?.preset_id) {
+              resolvePayload.preset_id = activeScenario.params.preset_id;
+            } else if (activeScenario?.params?.road) {
+              resolvePayload.road = activeScenario.params.road;
+            } else if (activeScenario?.closed_edges) {
+              resolvePayload.closed_edges = activeScenario.closed_edges;
+            }
+
+            const res = await fetch('/api/resolve-link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(resolvePayload),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              setAddedLinkResolved(data);
+              setPointA((prev) => ({ ...prev, node_id: data.node_a }));
+              setPointB({ lat, lng, node_id: data.node_b });
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              alert(errData.detail || 'Could not resolve temporary connector between selected points.');
+              setPointB(null);
+            }
+          } catch (err) {
+            console.error('Error resolving link:', err);
+          } finally {
+            setIsResolvingLink(false);
           }
-        } catch (err) {
-          console.error('Error resolving nodes:', err);
-        } finally {
-          setIsResolvingNodes(false);
+        } else {
+          // Cut road corridor resolution
+          setIsResolvingNodes(true);
+          try {
+            const res = await fetch('/api/resolve-nodes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                lat1: pointA.lat,
+                lng1: pointA.lng,
+                lat2: lat,
+                lng2: lng,
+              }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              setNodeClosureResolved(data);
+              setPointA((prev) => ({ ...prev, node_id: data.node_a }));
+              setPointB({ lat, lng, node_id: data.node_b });
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              alert(errData.detail || 'Could not find a connecting path between selected points. Try clicking points along a connected road.');
+              setPointB(null);
+            }
+          } catch (err) {
+            console.error('Error resolving nodes:', err);
+          } finally {
+            setIsResolvingNodes(false);
+          }
         }
       } else {
         // Reset and start new selection from this point
         setPointA({ lat, lng });
         setPointB(null);
         setNodeClosureResolved(null);
+        setAddedLinkResolved(null);
       }
       return;
     }
@@ -180,6 +227,32 @@ export default function App() {
     }
   };
 
+  const handleLinkSpeedChange = (val) => {
+    setLinkSpeed(val);
+    if (addedLinkResolved) {
+      const newTravelTime = (addedLinkResolved.distance_m / 1000.0) / Math.max(val, 1) * 60.0;
+      setAddedLinkResolved((prev) => {
+        let updatedComp = prev.route_comparison;
+        if (updatedComp && updatedComp.normal_travel_time_min != null) {
+          const timeSaved = Math.max(updatedComp.normal_travel_time_min - newTravelTime, 0);
+          const pct = updatedComp.normal_travel_time_min > 0 ? (timeSaved / updatedComp.normal_travel_time_min) * 100 : 0;
+          updatedComp = {
+            ...updatedComp,
+            link_travel_time_min: newTravelTime,
+            time_saved_min: timeSaved,
+            pct_faster: pct,
+          };
+        }
+        return {
+          ...prev,
+          speed_kmh: val,
+          travel_time_min: newTravelTime,
+          route_comparison: updatedComp,
+        };
+      });
+    }
+  };
+
   const handleClearRoute = () => {
     setClickedRoute(null);
     setOriginCoord(null);
@@ -189,6 +262,7 @@ export default function App() {
     setPointA(null);
     setPointB(null);
     setNodeClosureResolved(null);
+    setAddedLinkResolved(null);
   };
 
   const handleRunNodeClosure = () => {
@@ -196,6 +270,22 @@ export default function App() {
     handleRunScenario({
       scenario: 'closure',
       closed_edges: nodeClosureResolved.closed_edges,
+    });
+  };
+
+  const handleRunAddLink = () => {
+    if (!addedLinkResolved) return;
+    const activeParams = activeScenario?.params || {};
+    handleRunScenario({
+      scenario: 'link',
+      added_link: {
+        node_a: addedLinkResolved.node_a,
+        node_b: addedLinkResolved.node_b,
+        speed_kmh: linkSpeed,
+      },
+      closed_edges: activeParams.closed_edges || activeScenario?.closed_edges,
+      preset_id: activeParams.preset_id,
+      road: activeParams.road,
     });
   };
 
@@ -207,6 +297,7 @@ export default function App() {
     setPointA(null);
     setPointB(null);
     setNodeClosureResolved(null);
+    setAddedLinkResolved(null);
     fetchOverview(threshold, destCategory);
   };
 
@@ -254,9 +345,19 @@ export default function App() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {isDisrupted ? (
-            <div className="badge badge-rose" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
-              <span className="pulse-dot" style={{ background: '#f43f5e' }}></span>
-              Disruption Active: {activeScenario.scenario_title}
+            <div
+              className={`badge ${activeScenario?.added_link_info ? 'badge-cyan' : 'badge-rose'}`}
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.8rem',
+                borderColor: activeScenario?.added_link_info ? '#a855f7' : undefined,
+                background: activeScenario?.added_link_info ? 'rgba(168, 85, 247, 0.18)' : undefined,
+              }}
+            >
+              <span className="pulse-dot" style={{ background: activeScenario?.added_link_info ? '#c084fc' : '#f43f5e' }}></span>
+              {activeScenario?.added_link_info
+                ? `Temporary Link Active: ${activeScenario.scenario_title}`
+                : `Disruption Active: ${activeScenario.scenario_title}`}
             </div>
           ) : (
             <div className="badge badge-emerald" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
@@ -295,12 +396,19 @@ export default function App() {
           setShowRiskiest={setShowRiskiest}
           nodeClosureMode={nodeClosureMode}
           setNodeClosureMode={setNodeClosureMode}
+          customToolMode={customToolMode}
+          setCustomToolMode={setCustomToolMode}
+          linkSpeed={linkSpeed}
+          setLinkSpeed={handleLinkSpeedChange}
           pointA={pointA}
           pointB={pointB}
           nodeClosureResolved={nodeClosureResolved}
           isResolvingNodes={isResolvingNodes}
+          addedLinkResolved={addedLinkResolved}
+          isResolvingLink={isResolvingLink}
           onClearNodeClosure={handleClearNodeClosure}
           onRunNodeClosure={handleRunNodeClosure}
+          onRunAddLink={handleRunAddLink}
         />
 
         {/* Center Interactive Map & Telemetry Bar */}
@@ -309,29 +417,47 @@ export default function App() {
           <div className="map-telemetry-bar">
             <div className="hud-card">
               <div className="hud-label">
-                <Clock size={13} color={isDisrupted ? 'var(--accent-rose)' : 'var(--accent-cyan)'} />
-                {isDisrupted ? 'Average Delay' : 'Avg Access Time'}
+                <Clock size={13} color={isDisrupted ? (activeScenario?.added_link_info ? '#10b981' : 'var(--accent-rose)') : 'var(--accent-cyan)'} />
+                {activeScenario?.added_link_info
+                  ? '⚡ Direct Time Saved'
+                  : (isDisrupted ? 'Average Delay' : 'Avg Access Time')}
               </div>
-              <div className="hud-value" style={{ color: isDisrupted ? '#f87171' : '#ffffff', fontSize: '1.25rem' }}>
-                {isDisrupted
-                  ? `+${(activeScenario?.per_capita_debt_min || timeDelta).toFixed(1)} min`
-                  : `${avgTime?.toFixed(1)} min`}
+              <div className="hud-value" style={{ color: activeScenario?.added_link_info ? '#10b981' : (isDisrupted ? '#f87171' : '#ffffff'), fontSize: '1.25rem' }}>
+                {activeScenario?.added_link_info
+                  ? (activeScenario.added_link_info.route_comparison?.time_saved_min != null
+                    ? `-${activeScenario.added_link_info.route_comparison.time_saved_min.toFixed(1)} min`
+                    : `${activeScenario.added_link_info.travel_time_min?.toFixed(1)} min`)
+                  : (isDisrupted
+                    ? `+${(activeScenario?.per_capita_debt_min || timeDelta).toFixed(1)} min`
+                    : `${avgTime?.toFixed(1)} min`)}
               </div>
-              <div className={`hud-delta ${isDisrupted ? 'danger' : 'success'}`} style={{ fontSize: '0.7rem' }}>
-                {isDisrupted ? `City baseline: ${activeScenario?.avg_access_before?.toFixed(1)}m` : 'Normal City Flow'}
+              <div className={`hud-delta ${activeScenario?.added_link_info ? 'success' : (isDisrupted ? 'danger' : 'success')}`} style={{ fontSize: '0.7rem' }}>
+                {activeScenario?.added_link_info
+                  ? (activeScenario.added_link_info.route_comparison?.has_normal_route
+                    ? `${activeScenario.added_link_info.route_comparison.pct_faster?.toFixed(0)}% faster vs normal detour`
+                    : 'Restores disconnected road')
+                  : (isDisrupted ? `City baseline: ${activeScenario?.avg_access_before?.toFixed(1)}m` : 'Normal City Flow')}
               </div>
             </div>
 
             <div className="hud-card">
               <div className="hud-label">
-                <Zap size={13} color="var(--accent-amber)" />
-                {isDisrupted ? 'People Delayed' : 'Accessibility Impact'}
+                <Zap size={13} color={activeScenario?.added_link_info ? 'var(--accent-emerald)' : 'var(--accent-amber)'} />
+                {activeScenario?.added_link_info ? '⚡ Debt Mitigated' : (isDisrupted ? 'People Delayed' : 'Accessibility Impact')}
               </div>
-              <div className="hud-value" style={{ fontSize: '1.25rem' }}>
-                {isDisrupted ? (activeScenario?.pop_affected?.toLocaleString() || '0') : 'Optimal'}
+              <div className="hud-value" style={{ color: activeScenario?.added_link_info ? '#10b981' : undefined, fontSize: '1.25rem' }}>
+                {activeScenario?.added_link_info
+                  ? (activeScenario.debt_reduced_pop_min > 0
+                    ? `-${Math.round(activeScenario.debt_reduced_pop_min).toLocaleString()} m`
+                    : 'Optimal')
+                  : (isDisrupted ? (activeScenario?.pop_affected?.toLocaleString() || '0') : 'Optimal')}
               </div>
-              <div className="hud-delta warn" style={{ fontSize: '0.7rem' }}>
-                {isDisrupted ? `${activeScenario?.per_capita_debt_min?.toFixed(1)}m delay / resident` : '0 delays'}
+              <div className={`hud-delta ${activeScenario?.added_link_info ? 'success' : (isDisrupted ? 'warn' : 'success')}`} style={{ fontSize: '0.7rem' }}>
+                {activeScenario?.added_link_info
+                  ? (activeScenario.added_link_info.destination_impact?.avg_dest_time_saved_min > 0
+                    ? `-${activeScenario.added_link_info.destination_impact.avg_dest_time_saved_min.toFixed(1)}m avg hospital gain`
+                    : (activeScenario.pop_restored > 0 ? `${activeScenario.pop_restored.toLocaleString()} residents benefited` : 'Connector link active'))
+                  : (isDisrupted ? `${activeScenario?.per_capita_debt_min?.toFixed(1)}m delay / resident` : '0 delays')}
               </div>
             </div>
 
@@ -351,13 +477,17 @@ export default function App() {
             <div className="hud-card">
               <div className="hud-label">
                 <ShieldAlert size={13} color="var(--accent-rose)" />
-                Severe Cutoffs
+                {activeScenario?.added_link_info ? 'Remaining Debt' : 'Severe Cutoffs'}
               </div>
-              <div className="hud-value" style={{ color: lostPop > 0 ? '#f87171' : '#ffffff', fontSize: '1.25rem' }}>
-                {lostPop ? lostPop.toLocaleString() : '0'}
+              <div className="hud-value" style={{ color: (lostPop > 0 || (activeScenario?.debt_pop_minutes > 0)) ? '#f87171' : '#ffffff', fontSize: '1.25rem' }}>
+                {activeScenario?.added_link_info
+                  ? (activeScenario.debt_pop_minutes > 0 ? `${Math.round(activeScenario.debt_pop_minutes).toLocaleString()} m` : '0 m')
+                  : (lostPop ? lostPop.toLocaleString() : '0')}
               </div>
-              <div className={`hud-delta ${lostPop > 0 ? 'danger' : 'success'}`} style={{ fontSize: '0.7rem' }}>
-                {lostPop > 0 ? 'Lost Critical Care' : 'All Facilities Reachable'}
+              <div className={`hud-delta ${(lostPop > 0 || (activeScenario?.debt_pop_minutes > 0)) ? 'danger' : 'success'}`} style={{ fontSize: '0.7rem' }}>
+                {activeScenario?.added_link_info
+                  ? (activeScenario.debt_pop_minutes > 0 ? 'Residual Accessibility Debt' : 'Full Network Coverage')
+                  : (lostPop > 0 ? 'Lost Critical Care' : 'All Facilities Reachable')}
               </div>
             </div>
           </div>
@@ -454,9 +584,13 @@ export default function App() {
               alternativeRoute={currentAltRoute}
               originCoord={originCoord}
               nodeClosureMode={nodeClosureMode}
+              customToolMode={customToolMode}
               pointA={pointA}
               pointB={pointB}
               previewClosureGeoms={nodeClosureResolved?.coordinates || []}
+              previewLinkCoords={addedLinkResolved?.coordinates || []}
+              simulatedLinkCoords={activeScenario?.added_link_geometry || []}
+              addedLinkInfo={activeScenario?.added_link_info || addedLinkResolved}
               onMapClick={handleMapClick}
               onClearRoute={handleClearRoute}
               onClearNodeClosure={handleClearNodeClosure}

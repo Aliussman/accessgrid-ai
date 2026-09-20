@@ -33,6 +33,17 @@ def make_small_net() -> Network:
         for k, d in G[u][v].items():
             d["name"] = name
     G.add_node(4)  # isolated node with population but no road access
+    node_coords = {
+        0: (30.7300, 76.7800),
+        1: (30.7350, 76.7850),
+        2: (30.7400, 76.7900),
+        3: (30.7450, 76.7950),
+        4: (30.7500, 76.8000),
+        5: (30.7480, 76.7980),
+    }
+    for n, (lat, lon) in node_coords.items():
+        G.nodes[n]["y"] = lat
+        G.nodes[n]["x"] = lon
     hospitals = gpd.GeoDataFrame(
         [
             {"osm_id": "h0", "name": "Hospital Zero", "node_id": 0},

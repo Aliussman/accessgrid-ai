@@ -40,6 +40,7 @@ from src.engine import (
     find_edges_between_nodes,
     get_preset_edges,
     get_primary_alternative_route,
+    haversine_distance,
     hospital_surge_analysis,
     intervention_outcome,
     interventions,
@@ -49,6 +50,8 @@ from src.engine import (
     road_edges,
     route_edge_usage,
     travel_time_bands,
+    evaluate_link_addition,
+    compute_route_comparison,
 )
 from src.nl import parse_scenario
 
@@ -98,11 +101,18 @@ def _edge_coords(u: int, v: int) -> list[list[float]]:
 # --------------------------------------------------------------------------
 # Models
 # --------------------------------------------------------------------------
+class AddedLinkRequest(BaseModel):
+    node_a: int
+    node_b: int
+    speed_kmh: float = 30.0
+
+
 class SimulateRequest(BaseModel):
-    scenario: str = "closure"  # "closure", "facility", "corridor"
+    scenario: str = "closure"  # "closure", "facility", "corridor", "link"
     road: Optional[str] = None
     preset_id: Optional[str] = None
     closed_edges: Optional[List[List[int]]] = None
+    added_link: Optional[AddedLinkRequest] = None
     threshold: float = 15.0
     category: str = "hospital"
 
@@ -141,9 +151,89 @@ class ResolveNodesRequest(BaseModel):
     node2: Optional[int] = None
 
 
+class ResolveLinkRequest(BaseModel):
+    lat1: Optional[float] = None
+    lng1: Optional[float] = None
+    lat2: Optional[float] = None
+    lng2: Optional[float] = None
+    node1: Optional[int] = None
+    node2: Optional[int] = None
+    speed_kmh: float = 30.0
+    closed_edges: Optional[list[list[int]]] = None
+    preset_id: Optional[str] = None
+    road: Optional[str] = None
+
+
 # --------------------------------------------------------------------------
 # Endpoints
 # --------------------------------------------------------------------------
+@app.post("/api/resolve-link")
+def resolve_link_connection(req: ResolveLinkRequest):
+    """Resolve two coordinates/nodes for a temporary connector link, validate length <= 3km, and calculate travel time."""
+    node_a = req.node1
+    if node_a is None:
+        if req.lat1 is None or req.lng1 is None:
+            raise HTTPException(status_code=400, detail="Must provide either node1 or lat1/lng1")
+        node_a = nearest_node_to_coord(NET, req.lat1, req.lng1)
+
+    node_b = req.node2
+    if node_b is None:
+        if req.lat2 is None or req.lng2 is None:
+            raise HTTPException(status_code=400, detail="Must provide either node2 or lat2/lng2")
+        node_b = nearest_node_to_coord(NET, req.lat2, req.lng2)
+
+    if node_a is None or node_b is None:
+        raise HTTPException(status_code=404, detail="Could not snap coordinates to graph nodes.")
+
+    if node_a == node_b:
+        raise HTTPException(status_code=400, detail="Selected points snapped to the same network node. Please choose points farther apart.")
+
+    node_a_data = NET.graph.nodes[node_a]
+    node_b_data = NET.graph.nodes[node_b]
+    lat_a, lng_a = float(node_a_data["y"]), float(node_a_data["x"])
+    lat_b, lng_b = float(node_b_data["y"]), float(node_b_data["x"])
+
+    dist_m = haversine_distance(lat_a, lng_a, lat_b, lng_b)
+    if dist_m > 3000.0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Straight-line connector exceeds 3 km limit ({dist_m / 1000.0:.2f} km). Please choose points closer together."
+        )
+
+    speed_kmh = max(float(req.speed_kmh), 1.0)
+    travel_time_min = (dist_m / 1000.0) / speed_kmh * 60.0
+
+    closed_edges = []
+    if req.preset_id and req.preset_id in DISASTER_PRESETS:
+        closed_edges = get_preset_edges(NET, req.preset_id)
+    elif req.closed_edges:
+        closed_edges = [(min(int(u), int(v)), max(int(u), int(v))) for u, v in req.closed_edges]
+    elif req.road:
+        closed_edges = road_edges(NET.graph, req.road)
+
+    route_comp = compute_route_comparison(
+        net=NET,
+        node_a=node_a,
+        node_b=node_b,
+        link_dist_m=dist_m,
+        link_travel_time_min=travel_time_min,
+        closed_edges=closed_edges,
+    )
+
+    return {
+        "node_a": int(node_a),
+        "node_b": int(node_b),
+        "node_a_coord": {"lat": lat_a, "lng": lng_a},
+        "node_b_coord": {"lat": lat_b, "lng": lng_b},
+        "distance_m": float(dist_m),
+        "distance_km": float(dist_m / 1000.0),
+        "speed_kmh": float(speed_kmh),
+        "travel_time_min": float(travel_time_min),
+        "coordinates": [[lat_a, lng_a], [lat_b, lng_b]],
+        "route_comparison": route_comp,
+    }
+
+
 @app.post("/api/resolve-nodes")
 def resolve_nodes_closure(req: ResolveNodesRequest):
     """Resolve two coordinates/nodes to network nodes and find the corridor edges between them."""
@@ -367,8 +457,40 @@ def run_simulation(req: SimulateRequest):
     candidates: list[dict] = []
     boost_coords: list[list[list[float]]] = []
     facility_coord: Optional[dict] = None
+    added_link_info: Optional[Dict[str, Any]] = None
+    added_link_coords: list[list[float]] = []
 
-    if req.scenario == "facility" and req.road:
+    if req.scenario == "link" or req.added_link:
+        if not req.added_link:
+            raise HTTPException(status_code=400, detail="Must provide added_link data (node_a, node_b, speed_kmh).")
+        try:
+            impact = evaluate_link_addition(
+                NET,
+                req.added_link.node_a,
+                req.added_link.node_b,
+                speed_kmh=req.added_link.speed_kmh,
+                closed_edges=closed_edges,
+                threshold=req.threshold,
+                baseline=baseline,
+            )
+            added_link_info = {
+                "node_a": impact["node_a"],
+                "node_b": impact["node_b"],
+                "length_m": impact["length_m"],
+                "length_km": impact["length_km"],
+                "speed_kmh": impact["speed_kmh"],
+                "travel_time_min": impact["travel_time_min"],
+                "debt_without_link_pop_min": impact["debt_without_link_pop_min"],
+                "debt_reduced_pop_min": impact["debt_reduced_pop_min"],
+                "pop_restored": impact.get("pop_restored", 0),
+                "route_comparison": impact.get("route_comparison"),
+                "destination_impact": impact.get("destination_impact"),
+            }
+            added_link_coords = impact.get("link_geometry", [])
+            scenario_title = f"Temporary Link Connector ({impact['length_km']:.2f} km @ {impact['speed_kmh']:.0f} km/h)"
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    elif req.scenario == "facility" and req.road:
         fn = facility_node_for_road(NET, req.road)
         if fn is not None:
             impact = add_facility_to_closure(NET, fn, closed_edges, req.threshold, baseline)
@@ -460,6 +582,10 @@ def run_simulation(req: SimulateRequest):
         "avg_access_after": impact.get("avg_access_after", 0.0),
         "debt_pop_minutes": impact.get("debt_pop_minutes", 0.0),
         "per_capita_debt_min": impact.get("per_capita_debt_min", 0.0),
+        "debt_reduced_pop_min": impact.get("debt_reduced_pop_min", 0.0),
+        "pop_restored": impact.get("pop_restored", 0),
+        "added_link_info": added_link_info,
+        "added_link_geometry": added_link_coords,
         "equity": impact.get("equity", {}),
         "surge": surge,
         "candidates": candidates,

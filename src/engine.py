@@ -12,6 +12,7 @@ All times use the edge attribute ``travel_time`` (minutes), set in
 from __future__ import annotations
 
 import heapq
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -1175,6 +1176,256 @@ def corridor_road(
         "baseline_covered_pop": int(baseline["covered_pop"]),
         "road_name": road_name,
         "corridor_factor": float(factor),
+        **fields,
+    }
+
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate the great-circle distance between two points in meters."""
+    R = 6371000.0  # Earth's radius in meters
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2.0) ** 2
+    return 2.0 * R * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+
+def compute_route_comparison(
+    net: Network,
+    node_a: int,
+    node_b: int,
+    link_dist_m: float,
+    link_travel_time_min: float,
+    closed_edges: list[tuple[int, int]] = (),
+) -> dict:
+    """Compare direct travel between node_a and node_b via normal road network vs via temporary link."""
+    node_a = int(node_a)
+    node_b = int(node_b)
+    work = net.graph.copy()
+    if closed_edges:
+        closed = set((min(u, v), max(u, v)) for u, v in closed_edges)
+        for u, v in closed:
+            if u in work and v in work:
+                for k in list(work.get_edge_data(u, v) or {}):
+                    work.remove_edge(u, v, k)
+
+    try:
+        normal_travel_time_min, normal_path = nx.bidirectional_dijkstra(
+            work, node_a, node_b, weight="travel_time"
+        )
+        normal_dist_m = 0.0
+        normal_route_coords = []
+        for u in normal_path:
+            d = work.nodes[u]
+            normal_route_coords.append([float(d["y"]), float(d["x"])])
+        for u, v in zip(normal_path[:-1], normal_path[1:]):
+            edata = work.get_edge_data(u, v)
+            if edata:
+                lengths = []
+                for d in edata.values():
+                    l_val = d.get("length", 0.0)
+                    try:
+                        lengths.append(float(l_val))
+                    except (ValueError, TypeError):
+                        lengths.append(0.0)
+                normal_dist_m += min(lengths) if lengths else 0.0
+        has_normal_route = True
+        time_saved_min = max(float(normal_travel_time_min) - float(link_travel_time_min), 0.0)
+        pct_faster = (time_saved_min / float(normal_travel_time_min) * 100.0) if normal_travel_time_min > 0 else 0.0
+        distance_saved_km = max((normal_dist_m - link_dist_m) / 1000.0, 0.0)
+        normal_dist_km = normal_dist_m / 1000.0
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        has_normal_route = False
+        normal_travel_time_min = None
+        normal_dist_m = None
+        normal_dist_km = None
+        normal_route_coords = []
+        time_saved_min = None
+        pct_faster = None
+        distance_saved_km = None
+
+    return {
+        "has_normal_route": has_normal_route,
+        "normal_travel_time_min": float(normal_travel_time_min) if normal_travel_time_min is not None else None,
+        "normal_distance_m": float(normal_dist_m) if normal_dist_m is not None else None,
+        "normal_distance_km": float(normal_dist_km) if normal_dist_km is not None else None,
+        "normal_route_coords": normal_route_coords,
+        "link_travel_time_min": float(link_travel_time_min),
+        "link_distance_m": float(link_dist_m),
+        "link_distance_km": float(link_dist_m / 1000.0),
+        "time_saved_min": float(time_saved_min) if time_saved_min is not None else None,
+        "pct_faster": float(pct_faster) if pct_faster is not None else None,
+        "distance_saved_km": float(distance_saved_km) if distance_saved_km is not None else None,
+    }
+
+
+def evaluate_link_addition(
+    net: Network,
+    node_a: int,
+    node_b: int,
+    speed_kmh: float = 30.0,
+    closed_edges: list[tuple[int, int]] = (),
+    threshold: float = DEFAULT_THRESHOLD_MIN,
+    baseline: Optional[dict] = None,
+) -> dict:
+    """Evaluate adding a temporary connector link between node_a and node_b.
+
+    Runs on a copy of the road graph with closed_edges removed (if any) and a
+    two-way temporary connector edge added. Never mutates net.graph.
+
+    Constraints:
+      - node_a != node_b
+      - straight-line distance <= 3000 meters (3 km)
+      - speed_kmh > 0 (default 30 km/h)
+      - travel_time (minutes) = (length_m / 1000.0) / speed_kmh * 60.0
+    """
+    node_a = int(node_a)
+    node_b = int(node_b)
+    if node_a not in net.graph or node_b not in net.graph:
+        raise ValueError(f"Nodes ({node_a}, {node_b}) must exist in the network graph.")
+    if node_a == node_b:
+        raise ValueError("Selected points snapped to the same network node. Please choose points farther apart.")
+
+    speed_kmh = max(float(speed_kmh), 1.0)
+    data_a = net.graph.nodes[node_a]
+    data_b = net.graph.nodes[node_b]
+    lat_a, lng_a = float(data_a["y"]), float(data_a["x"])
+    lat_b, lng_b = float(data_b["y"]), float(data_b["x"])
+
+    dist_m = haversine_distance(lat_a, lng_a, lat_b, lng_b)
+    if dist_m > 3000.0:
+        raise ValueError(f"Straight-line connector exceeds 3 km limit ({dist_m / 1000.0:.2f} km). Please choose points closer together.")
+
+    travel_time_min = (dist_m / 1000.0) / speed_kmh * 60.0
+
+    if baseline is None:
+        baseline = coverage(net, threshold)
+
+    closed = sorted(set((min(u, v), max(u, v)) for u, v in closed_edges)) if closed_edges else []
+
+    # Non-mutating graph copy
+    work = net.graph.copy()
+    for u, v in closed:
+        if u in work and v in work:
+            for k in list((work.get_edge_data(u, v) or {})):
+                work.remove_edge(u, v, k)
+
+    # Add two-way temporary link
+    work.add_edge(
+        node_a,
+        node_b,
+        length=dist_m,
+        travel_time=travel_time_min,
+        speed_kph=speed_kmh,
+        custom_link=True,
+    )
+
+    sources = [int(n) for n in net.hospitals["node_id"]]
+    new_time, new_hosp = nearest_hospitals(work, sources)
+
+    osm_by_node = getattr(net, "_osm_by_node", None)
+    if not osm_by_node:
+        osm_by_node = {
+            int(row["node_id"]): str(row["osm_id"])
+            for _, row in net.hospitals.iterrows()
+        }
+
+    fields = _classify(baseline, new_time, net.population, threshold, osm_by_node, net.vulnerability)
+    base_time = baseline["node_time"]
+    fields["new_covered_pop"] = sum(
+        net.population.get(n, 0)
+        for n in work.nodes
+        if base_time.get(n, INF) > threshold and new_time.get(n, INF) <= threshold
+    )
+    fields["time_to_hospital"] = new_time
+    fields["node_hospital"] = new_hosp
+
+    # Calculate debt mitigation and restored population
+    if closed:
+        disrupted = _evaluate_modification(net, baseline, threshold, closed, [])
+        prior_time = disrupted["time_to_hospital"]
+        prior_hosp = disrupted["node_hospital"]
+        debt_without_link = disrupted["debt_pop_minutes"]
+        debt_with_link = fields["debt_pop_minutes"]
+        debt_reduced = max(debt_without_link - debt_with_link, 0.0)
+        pop_restored = max(disrupted["pop_lost_coverage"] - fields["pop_lost_coverage"], 0)
+    else:
+        prior_time = baseline["node_time"]
+        prior_hosp = baseline["node_hospital"]
+        debt_without_link = 0.0
+        # Time savings across all improved nodes
+        debt_reduced = sum(
+            net.population.get(n, 0) * max(base_time.get(n, INF) - new_time.get(n, INF), 0.0)
+            for n in work.nodes
+            if base_time.get(n, INF) != INF and new_time.get(n, INF) != INF
+        )
+        pop_restored = fields["new_covered_pop"]
+
+    # Endpoint destination access improvements
+    dest_before_a = prior_time.get(node_a, INF)
+    dest_after_a = new_time.get(node_a, INF)
+    dest_saved_a = max(dest_before_a - dest_after_a, 0.0) if (dest_before_a != INF and dest_after_a != INF) else None
+
+    dest_before_b = prior_time.get(node_b, INF)
+    dest_after_b = new_time.get(node_b, INF)
+    dest_saved_b = max(dest_before_b - dest_after_b, 0.0) if (dest_before_b != INF and dest_after_b != INF) else None
+
+    # Population-wide destination time savings
+    improved_pops = []
+    improved_time_diffs = []
+    for n in work.nodes:
+        t_before = prior_time.get(n, INF)
+        t_after = new_time.get(n, INF)
+        if t_before != INF and t_after != INF and t_before > t_after:
+            p = net.population.get(n, 0)
+            if p > 0:
+                improved_pops.append(p)
+                improved_time_diffs.append((t_before - t_after) * p)
+
+    pop_improved = sum(improved_pops)
+    avg_dest_time_saved = (sum(improved_time_diffs) / pop_improved) if pop_improved > 0 else 0.0
+    max_dest_time_saved = max(
+        (prior_time.get(n, INF) - new_time.get(n, INF) for n in work.nodes if prior_time.get(n, INF) != INF and new_time.get(n, INF) != INF),
+        default=0.0
+    )
+
+    route_comparison = compute_route_comparison(
+        net=net,
+        node_a=node_a,
+        node_b=node_b,
+        link_dist_m=dist_m,
+        link_travel_time_min=travel_time_min,
+        closed_edges=closed,
+    )
+
+    return {
+        "threshold": float(threshold),
+        "node_a": node_a,
+        "node_b": node_b,
+        "node_a_coord": {"lat": lat_a, "lng": lng_a},
+        "node_b_coord": {"lat": lat_b, "lng": lng_b},
+        "length_m": float(dist_m),
+        "length_km": float(dist_m / 1000.0),
+        "speed_kmh": float(speed_kmh),
+        "travel_time_min": float(travel_time_min),
+        "closed_edges": [(int(u), int(v)) for u, v in closed],
+        "baseline_covered_pop": int(baseline["covered_pop"]),
+        "debt_without_link_pop_min": float(debt_without_link),
+        "debt_reduced_pop_min": float(debt_reduced),
+        "pop_restored": int(pop_restored),
+        "link_geometry": [[lat_a, lng_a], [lat_b, lng_b]],
+        "route_comparison": route_comparison,
+        "destination_impact": {
+            "dest_time_before_a": float(dest_before_a) if dest_before_a != INF else None,
+            "dest_time_after_a": float(dest_after_a) if dest_after_a != INF else None,
+            "dest_time_saved_a": float(dest_saved_a) if dest_saved_a is not None else None,
+            "dest_time_before_b": float(dest_before_b) if dest_before_b != INF else None,
+            "dest_time_after_b": float(dest_after_b) if dest_after_b != INF else None,
+            "dest_time_saved_b": float(dest_saved_b) if dest_saved_b is not None else None,
+            "pop_improved_time": int(pop_improved),
+            "avg_dest_time_saved_min": float(avg_dest_time_saved),
+            "max_dest_time_saved_min": float(max_dest_time_saved),
+        },
         **fields,
     }
 
